@@ -5,7 +5,7 @@ function getNodeById(nodeId, graphData) {
 function makeLinkedNodeItem(node, graphData) {
   const button = document.createElement("button");
   button.className = "linked-item";
-  button.textContent = node.name;
+  button.innerHTML = `<span>${node.name}</span><span class="linked-meta">${node.type || "node"}</span>`;
   button.addEventListener("click", () => {
     if (window.highlightNode) {
       window.highlightNode(node.id);
@@ -36,12 +36,13 @@ async function loadNodeDetail(node, graphData) {
     }
 
     document.getElementById("detail-panel").classList.remove("hidden");
+    document.getElementById("detail-shell").classList.remove("hidden");
     document.getElementById("node-name").textContent = data.name || "Unknown Node";
     document.getElementById("node-file").textContent = `${data.file || "unknown"}:${data.line || 0}`;
     document.getElementById("node-summary").textContent = data.summary || "No summary available.";
     document.getElementById("mutation-badge").innerHTML = getMutationBadgeHTML(data.mutation_status);
     document.getElementById("churn-info").textContent =
-      `🔁 Churn: ${data.churn_count || 0} commits | Last: ${data.last_modified_commit || "N/A"}`;
+      `Churn: ${data.churn_count || 0} commits | Last: ${data.last_modified_commit || "N/A"}`;
 
     const callersContainer = document.getElementById("callers-list");
     const calleesContainer = document.getElementById("callees-list");
@@ -103,13 +104,16 @@ function showBlastInfo(blastData) {
       details.open = Number(depth) <= 1;
 
       const summaryNode = document.createElement("summary");
-      summaryNode.textContent = `Depth ${depth}`;
+      summaryNode.textContent = `Depth ${depth} - ${grouped[depth].length} node${grouped[depth].length === 1 ? "" : "s"}`;
       details.appendChild(summaryNode);
 
+      const body = document.createElement("div");
+      body.className = "depth-body";
       grouped[depth].forEach((nodeId) => {
         const node = getNodeById(nodeId, graphData) || { id: nodeId, name: nodeId };
-        details.appendChild(makeLinkedNodeItem(node, graphData));
+        body.appendChild(makeLinkedNodeItem(node, graphData));
       });
+      details.appendChild(body);
 
       blastContainer.appendChild(details);
     });
@@ -117,7 +121,12 @@ function showBlastInfo(blastData) {
 
 function hidePanel() {
   document.getElementById("detail-panel").classList.add("hidden");
+  document.getElementById("detail-shell").classList.add("hidden");
 }
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("panel-close-btn")?.addEventListener("click", hidePanel);
+});
 
 window.loadNodeDetail = loadNodeDetail;
 window.showBlastInfo = showBlastInfo;

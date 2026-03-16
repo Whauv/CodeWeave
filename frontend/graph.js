@@ -14,11 +14,39 @@ let nodeSelection;
 let labelSelection;
 let monacoEditor = null;
 
+function setMetricValue(id, value) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.textContent = value;
+  }
+}
+
 function setStatus(message) {
   const status = document.getElementById("status-label");
   if (status) {
     status.textContent = message;
   }
+}
+
+function setMode(mode) {
+  setMetricValue("metric-mode", mode);
+}
+
+function setSelectedLabel(label) {
+  setMetricValue("metric-selected", label);
+}
+
+function setGraphMetrics(nodesCount, edgesCount) {
+  setMetricValue("metric-nodes", String(nodesCount));
+  setMetricValue("metric-edges", String(edgesCount));
+}
+
+function showEmptyState() {
+  document.getElementById("graph-empty-state")?.classList.remove("hidden");
+}
+
+function hideEmptyState() {
+  document.getElementById("graph-empty-state")?.classList.add("hidden");
 }
 
 function getNodeRadius(node) {
@@ -196,6 +224,10 @@ function initGraph(data) {
   window.__CODEMAPPER_GRAPH__ = data;
   computeNodeDegrees(graphData);
   renderGraph(graphData);
+  hideEmptyState();
+  setGraphMetrics(graphData.nodes.length, graphData.edges.length);
+  setMode("Explore");
+  setSelectedLabel("None");
   clearBlastRadius();
 }
 
@@ -205,6 +237,8 @@ function updateGraph(data) {
 
 function highlightNode(nodeId) {
   selectedNodeId = nodeId;
+  const selectedNode = graphData?.nodes?.find((node) => node.id === nodeId);
+  setSelectedLabel(selectedNode ? selectedNode.name : "None");
   nodeSelection
     .attr("stroke", (node) => (node.id === nodeId ? "#ffcc00" : "#111"))
     .attr("stroke-width", (node) => (node.id === nodeId ? 4 : 2));
@@ -221,6 +255,7 @@ async function triggerBlastRadius(node) {
 
     blastMode = true;
     currentBlastData = data;
+    setMode("Blast");
     const affected = new Set(data.affected_nodes || []);
 
     nodeSelection
@@ -247,6 +282,7 @@ async function triggerBlastRadius(node) {
 function clearBlastRadius() {
   blastMode = false;
   currentBlastData = null;
+  setMode("Explore");
   if (!nodeSelection) {
     return;
   }
@@ -273,6 +309,7 @@ function searchNodes(query) {
 
   const normalized = query.trim().toLowerCase();
   if (!normalized) {
+    setStatus(graphData ? `Loaded ${graphData.nodes.length} nodes and ${graphData.edges.length} edges` : "Ready to scan");
     nodeSelection
       .attr("opacity", blastMode && currentBlastData
         ? (d) => (currentBlastData.affected_nodes || []).includes(d.id) ? 1 : 0.15
@@ -300,6 +337,7 @@ function searchNodes(query) {
     .attr("stroke-width", (node) => (matches.has(node.id) ? 4 : 2));
 
   labelSelection.attr("opacity", (node) => (matches.has(node.id) ? 1 : 0.2));
+  setStatus(`Search matched ${matches.size} node${matches.size === 1 ? "" : "s"}`);
 }
 
 function ensureMonaco(sourceCode) {
@@ -349,6 +387,7 @@ async function scanProject() {
 
   try {
     setStatus("Scanning project...");
+    setMode("Scan");
     const response = await fetch("/api/scan", {
       method: "POST",
       headers: {
@@ -366,10 +405,12 @@ async function scanProject() {
   } catch (error) {
     console.error(error);
     setStatus(error.message);
+    setMode("Error");
   }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  showEmptyState();
   document.getElementById("scan-btn").addEventListener("click", scanProject);
   document.getElementById("search-input").addEventListener("input", (event) => {
     searchNodes(event.target.value);

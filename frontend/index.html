@@ -7,198 +7,517 @@
   <style>
     :root {
       --bg: #0d0d0d;
-      --panel: #171717;
-      --panel-2: #1f1f1f;
-      --border: #2e2e2e;
-      --text: #f5f5f5;
-      --muted: #9d9d9d;
-      --accent: #ffcc00;
+      --bg-soft: #131516;
+      --panel: rgba(20, 24, 25, 0.88);
+      --panel-strong: rgba(13, 16, 17, 0.94);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --text: #f4f1e8;
+      --muted: #9ea7a3;
+      --accent: #ff8c42;
+      --accent-soft: #f5c85b;
+      --accent-cool: #66d7d1;
+      --danger: #ff5b4d;
+      --shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
     }
 
     * {
       box-sizing: border-box;
     }
 
+    html,
     body {
       margin: 0;
-      background: radial-gradient(circle at top, #1b1b1b 0%, #0d0d0d 55%);
+      min-height: 100%;
+      background:
+        radial-gradient(circle at top left, rgba(102, 215, 209, 0.12), transparent 30%),
+        radial-gradient(circle at top right, rgba(255, 140, 66, 0.18), transparent 35%),
+        linear-gradient(180deg, #171311 0%, #0d0d0d 100%);
       color: var(--text);
-      font-family: "Segoe UI", sans-serif;
-      height: 100vh;
+      font-family: "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
+    }
+
+    body {
       overflow: hidden;
     }
 
-    .app-shell {
+    .shell {
       display: flex;
       flex-direction: column;
       height: 100vh;
+      padding: 18px;
+      gap: 14px;
     }
 
-    .top-bar {
-      height: 50px;
+    .top-frame,
+    .main-frame,
+    .detail-shell,
+    .metric-card,
+    .legend,
+    .empty-state {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .top-frame {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 360px;
+      gap: 14px;
+      padding: 18px;
+      border-radius: 26px;
+      min-height: 132px;
+    }
+
+    .brand-block {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.24em;
+      font-size: 0.72rem;
+      color: var(--accent-soft);
+    }
+
+    .brand-title {
+      margin: 0;
+      font-size: clamp(1.8rem, 2.6vw, 2.6rem);
+      line-height: 0.95;
+    }
+
+    .brand-copy {
+      margin: 0;
+      max-width: 30ch;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .controls-block {
+      display: grid;
+      grid-template-rows: auto auto;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) 140px minmax(220px, 0.8fr);
+      gap: 12px;
+    }
+
+    .field-shell {
       display: flex;
       align-items: center;
       gap: 10px;
       padding: 0 14px;
-      border-bottom: 1px solid var(--border);
-      background: rgba(13, 13, 13, 0.92);
-      backdrop-filter: blur(8px);
-    }
-
-    .top-bar input,
-    .top-bar button {
-      height: 34px;
-      border-radius: 8px;
+      border-radius: 16px;
       border: 1px solid var(--border);
-      background: var(--panel);
+      background: rgba(255, 255, 255, 0.03);
+      min-height: 52px;
+    }
+
+    .field-shell input {
+      width: 100%;
+      border: 0;
+      outline: 0;
+      background: transparent;
       color: var(--text);
-      padding: 0 12px;
+      font-size: 0.98rem;
+      font-family: inherit;
     }
 
-    #path-input {
-      flex: 1.5;
-      min-width: 240px;
-    }
-
-    #search-input {
-      flex: 1;
-      min-width: 200px;
-    }
-
-    #scan-btn,
-    .control-btn,
-    .modal-close {
-      cursor: pointer;
-      background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
-      transition: transform 0.18s ease, border-color 0.18s ease;
-    }
-
-    #scan-btn:hover,
-    .control-btn:hover,
-    .modal-close:hover {
-      transform: translateY(-1px);
-      border-color: #4a4a4a;
-    }
-
-    #status-label {
-      min-width: 180px;
+    .field-icon {
       color: var(--muted);
       font-size: 0.92rem;
-      text-align: right;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
     }
 
-    .main-area {
+    .action-btn,
+    .ghost-btn,
+    .modal-close,
+    .panel-close,
+    .linked-item {
+      font-family: inherit;
+    }
+
+    .action-btn,
+    .ghost-btn,
+    .modal-close,
+    .panel-close {
+      border: 1px solid var(--border);
+      color: var(--text);
+      cursor: pointer;
+      transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    }
+
+    .action-btn:hover,
+    .ghost-btn:hover,
+    .modal-close:hover,
+    .panel-close:hover {
+      transform: translateY(-1px);
+      border-color: var(--border-strong);
+    }
+
+    .action-btn {
+      border-radius: 16px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-soft));
+      color: #16110f;
+      font-weight: 700;
+      font-size: 0.98rem;
+    }
+
+    .status-row {
       display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .status-pill,
+    .mini-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .mini-pill strong {
+      color: var(--text);
+      font-size: 1rem;
+    }
+
+    .summary-block {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .metric-card {
+      border-radius: 18px;
+      padding: 16px;
+    }
+
+    .metric-label {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      font-size: 0.72rem;
+      margin-bottom: 10px;
+    }
+
+    .metric-value {
+      font-size: 1.9rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .metric-note {
+      color: var(--muted);
+      line-height: 1.4;
+      font-size: 0.92rem;
+    }
+
+    .main-frame {
       flex: 1;
       min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.78fr);
+      gap: 14px;
+      border-radius: 30px;
+      padding: 14px;
+    }
+
+    .graph-shell,
+    .detail-shell {
+      position: relative;
+      min-height: 0;
+      border-radius: 24px;
+      overflow: hidden;
+      background: var(--panel-strong);
+    }
+
+    .graph-shell::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.8), transparent 95%);
+      pointer-events: none;
+    }
+
+    .graph-toolbar {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      z-index: 6;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      pointer-events: none;
+    }
+
+    .toolbar-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      pointer-events: auto;
+    }
+
+    .legend {
+      display: grid;
+      gap: 10px;
+      border-radius: 18px;
+      padding: 14px;
+      min-width: 214px;
+    }
+
+    .legend-title {
+      font-size: 0.82rem;
+      letter-spacing: 0.16em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 0.88rem;
+      color: var(--text);
+    }
+
+    .legend-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      flex: 0 0 auto;
+    }
+
+    .legend-name {
+      flex: 1;
+      color: var(--muted);
+    }
+
+    .ghost-btn {
+      min-height: 38px;
+      border-radius: 12px;
+      padding: 0 14px;
+      background: rgba(255, 255, 255, 0.05);
     }
 
     #graph-container {
-      position: relative;
-      width: 70%;
-      min-width: 0;
-      border-right: 1px solid var(--border);
+      width: 100%;
+      height: 100%;
     }
 
     #graph-svg {
       width: 100%;
       height: 100%;
       display: block;
+      position: relative;
+      z-index: 1;
     }
 
-    #graph-controls {
+    .empty-state {
       position: absolute;
-      right: 16px;
-      top: 16px;
+      inset: 50% auto auto 50%;
+      transform: translate(-50%, -50%);
+      width: min(540px, calc(100% - 40px));
       z-index: 5;
-      display: flex;
-      gap: 8px;
+      border-radius: 26px;
+      padding: 24px;
+      text-align: left;
+      pointer-events: none;
     }
 
-    .control-btn {
-      color: var(--text);
-      padding: 8px 12px;
-      border-radius: 8px;
+    .empty-state.hidden {
+      display: none;
+    }
+
+    .empty-title {
+      margin: 0 0 12px;
+      font-size: 1.7rem;
+      line-height: 1;
+    }
+
+    .empty-copy {
+      margin: 0 0 18px;
+      color: var(--muted);
+      line-height: 1.6;
+      max-width: 42ch;
+    }
+
+    .empty-points {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .empty-point {
+      padding: 10px 12px;
+      border-radius: 999px;
       border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      font-size: 0.86rem;
+    }
+
+    .detail-shell {
+      display: flex;
+      flex-direction: column;
+      padding: 18px;
+      gap: 14px;
     }
 
     #detail-panel {
-      width: 30%;
-      min-width: 320px;
-      max-width: 480px;
-      background: linear-gradient(180deg, rgba(30, 30, 30, 0.98), rgba(18, 18, 18, 0.98));
-      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-height: 0;
       overflow-y: auto;
+      padding-right: 4px;
     }
 
     #detail-panel.hidden {
       display: none;
     }
 
-    .panel-card,
-    .summary-box,
-    .blast-box,
-    .list-card {
-      background: var(--panel-2);
+    .detail-shell.hidden #detail-panel {
+      display: none;
+    }
+
+    .detail-shell.hidden .detail-placeholder {
+      display: flex;
+    }
+
+    .detail-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .detail-placeholder {
+      display: none;
+      flex: 1;
+      align-items: center;
+      justify-content: center;
+      text-align: left;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: 22px;
+      padding: 22px;
+      line-height: 1.6;
+    }
+
+    .panel-close {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 1.2rem;
+    }
+
+    .panel-card {
       border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 14px;
-      margin-bottom: 14px;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+      border-radius: 20px;
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .panel-label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      margin-bottom: 10px;
     }
 
     #node-name {
-      font-size: 1.5rem;
+      font-size: 1.8rem;
       font-weight: 700;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
+      line-height: 1;
     }
 
     #node-file,
     #churn-info {
-      font-family: Consolas, monospace;
       color: var(--muted);
-      font-size: 0.9rem;
+      font-family: Consolas, monospace;
+      font-size: 0.88rem;
+      line-height: 1.5;
+      word-break: break-word;
     }
 
     #node-summary {
-      line-height: 1.5;
-      color: #f0e6c0;
+      line-height: 1.65;
+      color: #f6dfb8;
+      font-size: 1rem;
+    }
+
+    #mutation-badge {
+      margin-bottom: 12px;
     }
 
     .mutation-badge {
       display: inline-flex;
       align-items: center;
-      padding: 6px 10px;
+      padding: 7px 12px;
       border-radius: 999px;
-      font-size: 0.78rem;
+      font-size: 0.74rem;
       font-weight: 700;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
+      border: 1px solid rgba(255, 255, 255, 0.08);
     }
 
-    .list-title {
-      font-size: 0.9rem;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      color: var(--muted);
-      margin-bottom: 10px;
+    .list-wrap {
+      display: grid;
+      gap: 10px;
     }
 
     .linked-item {
-      display: block;
-      color: var(--text);
-      text-decoration: none;
-      padding: 8px 10px;
-      margin-bottom: 8px;
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.03);
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 11px 12px;
+      border-radius: 14px;
       border: 1px solid transparent;
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text);
+      text-align: left;
       cursor: pointer;
     }
 
     .linked-item:hover {
-      border-color: var(--accent);
-      color: var(--accent);
+      border-color: rgba(255, 140, 66, 0.5);
+      background: rgba(255, 140, 66, 0.08);
+    }
+
+    .linked-meta {
+      color: var(--muted);
+      font-size: 0.8rem;
     }
 
     .epicenter {
@@ -206,118 +525,301 @@
     }
 
     @keyframes epicenterPulse {
-      0% { filter: drop-shadow(0 0 2px rgba(255, 70, 70, 0.4)); }
-      50% { filter: drop-shadow(0 0 12px rgba(255, 70, 70, 1)); }
-      100% { filter: drop-shadow(0 0 2px rgba(255, 70, 70, 0.4)); }
+      0% { filter: drop-shadow(0 0 4px rgba(255, 91, 77, 0.3)); }
+      50% { filter: drop-shadow(0 0 14px rgba(255, 91, 77, 0.95)); }
+      100% { filter: drop-shadow(0 0 4px rgba(255, 91, 77, 0.3)); }
+    }
+
+    .depth-group {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.02);
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+
+    .depth-group summary {
+      cursor: pointer;
+      padding: 12px 14px;
+      color: var(--accent-soft);
+      font-weight: 700;
+      list-style: none;
+    }
+
+    .depth-group summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .depth-body {
+      padding: 0 12px 12px;
+      display: grid;
+      gap: 8px;
     }
 
     #monaco-modal {
       position: fixed;
       inset: 0;
+      z-index: 30;
       display: none;
-      background: rgba(0, 0, 0, 0.88);
-      z-index: 20;
+      background: rgba(5, 7, 8, 0.88);
+      backdrop-filter: blur(14px);
     }
 
     #monaco-modal.visible {
       display: block;
     }
 
-    #monaco-editor {
+    .modal-shell {
       position: absolute;
-      inset: 32px;
-      border: 1px solid var(--border);
-      border-radius: 16px;
+      inset: 24px;
+      border-radius: 24px;
       overflow: hidden;
+      border: 1px solid var(--border);
+      background: rgba(10, 12, 13, 0.96);
+      box-shadow: var(--shadow);
+    }
+
+    .modal-topbar {
+      height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .modal-title {
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      font-size: 0.8rem;
+      color: var(--muted);
     }
 
     .modal-close {
-      position: absolute;
-      right: 46px;
-      top: 38px;
-      z-index: 25;
-      width: 40px;
-      height: 40px;
+      width: 42px;
+      height: 42px;
       border-radius: 999px;
-      border: 1px solid var(--border);
-      color: var(--text);
-      font-size: 1.3rem;
+      background: rgba(255, 255, 255, 0.05);
+      font-size: 1.25rem;
     }
 
-    .depth-group summary {
-      cursor: pointer;
-      color: var(--accent);
-      margin-bottom: 8px;
+    #monaco-editor {
+      position: absolute;
+      inset: 58px 0 0;
+    }
+
+    @media (max-width: 1220px) {
+      .top-frame {
+        grid-template-columns: 1fr;
+      }
+
+      .summary-block {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
     }
 
     @media (max-width: 980px) {
-      .main-area {
+      body {
+        overflow: auto;
+      }
+
+      .shell {
+        height: auto;
+        min-height: 100vh;
+      }
+
+      .control-row {
+        grid-template-columns: 1fr;
+      }
+
+      .summary-block {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .main-frame {
+        grid-template-columns: 1fr;
+      }
+
+      .graph-shell {
+        min-height: 58vh;
+      }
+
+      .detail-shell {
+        min-height: 40vh;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .shell {
+        padding: 12px;
+      }
+
+      .top-frame,
+      .main-frame {
+        border-radius: 22px;
+        padding: 12px;
+      }
+
+      .summary-block {
+        grid-template-columns: 1fr;
+      }
+
+      .legend {
+        min-width: 0;
+        width: 100%;
+      }
+
+      .graph-toolbar {
+        position: static;
+        padding: 14px 14px 0;
         flex-direction: column;
       }
 
-      #graph-container,
-      #detail-panel {
-        width: 100%;
-        max-width: none;
-      }
-
-      #graph-container {
-        height: 58vh;
-        border-right: none;
-        border-bottom: 1px solid var(--border);
+      .empty-state {
+        position: static;
+        transform: none;
+        width: auto;
+        margin: 90px 14px 14px;
       }
     }
   </style>
 </head>
 <body>
-  <div class="app-shell">
-    <div class="top-bar">
-      <input id="path-input" type="text" placeholder="Enter absolute project path..." />
-      <button id="scan-btn">⚡ Scan Project</button>
-      <input id="search-input" type="text" placeholder="🔍 Search nodes..." />
-      <div id="status-label">Ready</div>
-    </div>
-
-    <div class="main-area">
-      <div id="graph-container">
-        <div id="graph-controls">
-          <button id="clear-blast-btn" class="control-btn">Clear</button>
+  <div class="shell">
+    <section class="top-frame">
+      <div class="brand-block">
+        <div>
+          <div class="eyebrow">Code topology explorer</div>
+          <h1 class="brand-title">CodeMapper</h1>
         </div>
-        <svg id="graph-svg"></svg>
+        <p class="brand-copy">
+          Scan a Python repository, trace live relationships, inspect mutation hotspots, and simulate impact before you change code.
+        </p>
       </div>
 
-      <aside id="detail-panel" class="hidden">
-        <div class="panel-card">
-          <div id="node-name">Select a node</div>
-          <div id="node-file"></div>
+      <div class="controls-block">
+        <div class="control-row">
+          <label class="field-shell" for="path-input">
+            <span class="field-icon">Path</span>
+            <input id="path-input" type="text" placeholder="Enter absolute project path..." />
+          </label>
+          <button id="scan-btn" class="action-btn">Scan Project</button>
+          <label class="field-shell" for="search-input">
+            <span class="field-icon">Search</span>
+            <input id="search-input" type="text" placeholder="Filter by node name or summary..." />
+          </label>
         </div>
-        <div class="summary-box">
-          <div class="list-title">Summary</div>
-          <div id="node-summary">Node details will appear here.</div>
+
+        <div class="status-row">
+          <div id="status-label" class="status-pill">Ready to scan</div>
+          <div class="mini-pill">Nodes <strong id="metric-nodes">0</strong></div>
+          <div class="mini-pill">Edges <strong id="metric-edges">0</strong></div>
+          <div class="mini-pill">Selection <strong id="metric-selected">None</strong></div>
+          <div class="mini-pill">Mode <strong id="metric-mode">Explore</strong></div>
         </div>
-        <div class="panel-card">
-          <div id="mutation-badge"></div>
-          <div id="churn-info"></div>
+      </div>
+
+      <div class="summary-block">
+        <div class="metric-card">
+          <div class="metric-label">Scan lens</div>
+          <div class="metric-value">AST</div>
+          <div class="metric-note">Functions, classes, imports, and call edges are extracted directly from Python source.</div>
         </div>
-        <div class="list-card">
-          <div class="list-title">Callers</div>
-          <div id="callers-list"></div>
+        <div class="metric-card">
+          <div class="metric-label">Signal</div>
+          <div class="metric-value">Git</div>
+          <div class="metric-note">Recent churn colors the graph so hotspots stand out before you drill in.</div>
         </div>
-        <div class="list-card">
-          <div class="list-title">Callees</div>
-          <div id="callees-list"></div>
+      </div>
+    </section>
+
+    <section class="main-frame">
+      <div class="graph-shell">
+        <div class="graph-toolbar">
+          <div class="toolbar-group">
+            <button id="clear-blast-btn" class="ghost-btn">Clear Blast View</button>
+          </div>
+          <div class="legend">
+            <div class="legend-title">Mutation legend</div>
+            <div class="legend-row"><span class="legend-dot" style="background:#00ff88;"></span><span class="legend-name">New</span><span>recent file</span></div>
+            <div class="legend-row"><span class="legend-dot" style="background:#ffcc00;"></span><span class="legend-name">Modified</span><span>last 30 commits</span></div>
+            <div class="legend-row"><span class="legend-dot" style="background:#ff4444;"></span><span class="legend-name">Hotspot</span><span>high churn</span></div>
+            <div class="legend-row"><span class="legend-dot" style="background:#aaaaaa;"></span><span class="legend-name">Stable</span><span>no recent activity</span></div>
+          </div>
         </div>
-        <div class="blast-box">
-          <div class="list-title">Blast Radius</div>
-          <div id="blast-info">Right-click a node to simulate impact.</div>
+
+        <div id="graph-container">
+          <div id="graph-empty-state" class="empty-state">
+            <h2 class="empty-title">Scan a codebase to light up the map.</h2>
+            <p class="empty-copy">
+              Paste a local repository path, run a scan, then click nodes for details, right-click for blast radius, and double-click to open source.
+            </p>
+            <div class="empty-points">
+              <div class="empty-point">Interactive force graph</div>
+              <div class="empty-point">AI summaries</div>
+              <div class="empty-point">Git mutation overlays</div>
+              <div class="empty-point">Impact simulation</div>
+            </div>
+          </div>
+          <svg id="graph-svg"></svg>
+        </div>
+      </div>
+
+      <aside id="detail-shell" class="detail-shell hidden">
+        <div id="detail-panel" class="hidden">
+          <div class="panel-card">
+            <div class="detail-header">
+              <div>
+                <div class="panel-label">Selected node</div>
+                <div id="node-name">Select a node</div>
+                <div id="node-file"></div>
+              </div>
+              <button id="panel-close-btn" class="panel-close" title="Close panel">x</button>
+            </div>
+          </div>
+
+          <div class="panel-card">
+            <div class="panel-label">Summary</div>
+            <div id="node-summary">Node details will appear here.</div>
+          </div>
+
+          <div class="panel-card">
+            <div id="mutation-badge"></div>
+            <div id="churn-info"></div>
+          </div>
+
+          <div class="panel-card">
+            <div class="panel-label">Callers</div>
+            <div id="callers-list" class="list-wrap"></div>
+          </div>
+
+          <div class="panel-card">
+            <div class="panel-label">Callees</div>
+            <div id="callees-list" class="list-wrap"></div>
+          </div>
+
+          <div class="panel-card">
+            <div class="panel-label">Blast radius</div>
+            <div id="blast-info">Right-click a node to simulate impact.</div>
+          </div>
+        </div>
+
+        <div class="detail-placeholder">
+          Pick a node to inspect source relationships, Git churn, and downstream impact in one place.
         </div>
       </aside>
-    </div>
+    </section>
   </div>
 
   <div id="monaco-modal">
-    <button class="modal-close" id="modal-close-btn">×</button>
-    <div id="monaco-editor"></div>
+    <div class="modal-shell">
+      <div class="modal-topbar">
+        <div class="modal-title">Source viewer</div>
+        <button class="modal-close" id="modal-close-btn">x</button>
+      </div>
+      <div id="monaco-editor"></div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
