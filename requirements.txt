@@ -1,0 +1,7 @@
+flask
+flask-cors
+networkx
+pydriller
+groq
+astunparse
+python-dotenv
