@@ -21,6 +21,22 @@
       --shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
     }
 
+    body[data-theme="light"] {
+      --bg: #eef4f7;
+      --bg-soft: #f5f9fb;
+      --panel: rgba(255, 255, 255, 0.82);
+      --panel-strong: rgba(247, 251, 253, 0.96);
+      --border: rgba(23, 45, 62, 0.11);
+      --border-strong: rgba(23, 45, 62, 0.22);
+      --text: #163042;
+      --muted: #5e7483;
+      --accent: #1570ef;
+      --accent-soft: #7cc4fa;
+      --accent-cool: #0ea5a4;
+      --danger: #d93f52;
+      --shadow: 0 24px 60px rgba(28, 65, 93, 0.12);
+    }
+
     * {
       box-sizing: border-box;
     }
@@ -39,6 +55,13 @@
 
     body {
       overflow: hidden;
+    }
+
+    body[data-theme="light"] {
+      background:
+        radial-gradient(circle at top left, rgba(21, 112, 239, 0.12), transparent 30%),
+        radial-gradient(circle at top right, rgba(14, 165, 164, 0.1), transparent 35%),
+        linear-gradient(180deg, #f7fbfd 0%, #e7eef4 100%);
     }
 
     .shell {
@@ -262,6 +285,10 @@
       font-size: 0.98rem;
     }
 
+    body[data-theme="light"] .action-btn {
+      color: #f8fbff;
+    }
+
     .status-row {
       display: flex;
       gap: 10px;
@@ -348,6 +375,12 @@
       background-size: 44px 44px;
       mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.8), transparent 95%);
       pointer-events: none;
+    }
+
+    body[data-theme="light"] .graph-shell::before {
+      background-image:
+        linear-gradient(rgba(18, 48, 66, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(18, 48, 66, 0.05) 1px, transparent 1px);
     }
 
     .graph-toolbar {
@@ -864,6 +897,7 @@
           <div class="toolbar-group">
             <button id="tree-layout-btn" class="ghost-btn active">Tree Layout</button>
             <button id="force-layout-btn" class="ghost-btn">Force Layout</button>
+            <button id="theme-toggle-btn" class="ghost-btn">Light Theme</button>
             <button id="clear-blast-btn" class="ghost-btn">Clear Blast View</button>
           </div>
           <div class="legend">

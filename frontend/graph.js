@@ -18,6 +18,12 @@ let isScanning = false;
 let linkData = [];
 let nodeData = [];
 let layoutMode = "tree";
+let blastRequestInFlight = false;
+let themeMode = "dark";
+
+function getSelectedNode() {
+  return graphData?.nodes?.find((node) => node.id === selectedNodeId) || null;
+}
 
 function setMetricValue(id, value) {
   const element = document.getElementById(id);
@@ -30,6 +36,19 @@ function setStatus(message) {
   const status = document.getElementById("status-label");
   if (status) {
     status.textContent = message;
+  }
+}
+
+function syncActionButtons() {
+  const hasSelection = Boolean(getSelectedNode());
+  const blastButton = document.getElementById("simulate-blast-btn");
+  const sourceButton = document.getElementById("view-source-btn");
+  if (blastButton) {
+    blastButton.disabled = !hasSelection || blastRequestInFlight;
+    blastButton.textContent = blastRequestInFlight ? "Running Blast..." : "Simulate Blast Radius";
+  }
+  if (sourceButton) {
+    sourceButton.disabled = !hasSelection;
   }
 }
 
@@ -95,6 +114,18 @@ function setLayoutMode(nextMode) {
   if (graphData) {
     renderGraph(graphData);
     restoreVisualState();
+  }
+}
+
+function applyTheme(nextTheme, persist = true) {
+  themeMode = nextTheme;
+  document.body.dataset.theme = nextTheme;
+  const themeButton = document.getElementById("theme-toggle-btn");
+  if (themeButton) {
+    themeButton.textContent = nextTheme === "dark" ? "Light Theme" : "Dark Theme";
+  }
+  if (persist) {
+    window.localStorage.setItem("codemapper-theme", nextTheme);
   }
 }
 
@@ -419,6 +450,7 @@ function initGraph(data) {
   setMode("Explore");
   setSelectedLabel("None");
   clearBlastRadius();
+  syncActionButtons();
 }
 
 function restoreVisualState() {
@@ -436,10 +468,9 @@ function updateGraph(data) {
 
 function highlightNode(nodeId) {
   selectedNodeId = nodeId;
-  const selectedNode = graphData?.nodes?.find((node) => node.id === nodeId);
+  const selectedNode = getSelectedNode();
   setSelectedLabel(selectedNode ? selectedNode.name : "None");
-  document.getElementById("simulate-blast-btn")?.toggleAttribute("disabled", !selectedNode);
-  document.getElementById("view-source-btn")?.toggleAttribute("disabled", !selectedNode);
+  syncActionButtons();
   nodeSelection
     .attr("stroke", (node) => (node.id === nodeId ? "#ffcc00" : "#111"))
     .attr("stroke-width", (node) => (node.id === nodeId ? 4 : 2));
@@ -481,7 +512,13 @@ function applyBlastData(data) {
 }
 
 async function triggerBlastRadius(node) {
+  if (!node || blastRequestInFlight) {
+    return;
+  }
+
   try {
+    blastRequestInFlight = true;
+    syncActionButtons();
     setStatus(`Simulating blast radius for ${node.name}...`);
     const response = await fetch(`/api/blast/${node.id}`);
     const data = await response.json();
@@ -494,6 +531,9 @@ async function triggerBlastRadius(node) {
   } catch (error) {
     console.error(error);
     setStatus(error.message);
+  } finally {
+    blastRequestInFlight = false;
+    syncActionButtons();
   }
 }
 
@@ -520,6 +560,7 @@ function clearBlastRadius() {
   if (window.showBlastInfo) {
     window.showBlastInfo({ summary: "Right-click a node to simulate impact.", depth_map: {} });
   }
+  syncActionButtons();
 }
 
 function searchNodes(query) {
@@ -639,16 +680,20 @@ async function scanProject() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  applyTheme(window.localStorage.getItem("codemapper-theme") || "dark", false);
   showEmptyState();
   document.getElementById("scan-btn").addEventListener("click", scanProject);
   document.getElementById("tree-layout-btn").addEventListener("click", () => setLayoutMode("tree"));
   document.getElementById("force-layout-btn").addEventListener("click", () => setLayoutMode("force"));
+  document.getElementById("theme-toggle-btn").addEventListener("click", () => {
+    applyTheme(themeMode === "dark" ? "light" : "dark");
+  });
   document.getElementById("search-input").addEventListener("input", (event) => {
     searchNodes(event.target.value);
   });
   document.getElementById("clear-blast-btn").addEventListener("click", clearBlastRadius);
   document.getElementById("simulate-blast-btn").addEventListener("click", () => {
-    const node = graphData?.nodes?.find((item) => item.id === selectedNodeId);
+    const node = getSelectedNode();
     if (node) {
       triggerBlastRadius(node);
     } else {
@@ -656,7 +701,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   document.getElementById("view-source-btn").addEventListener("click", () => {
-    const node = graphData?.nodes?.find((item) => item.id === selectedNodeId);
+    const node = getSelectedNode();
     if (node) {
       openMonacoModal(node.source_code || "# No source code available");
     } else {
@@ -676,6 +721,7 @@ document.addEventListener("DOMContentLoaded", () => {
       monacoEditor.layout();
     }
   });
+  syncActionButtons();
 });
 
 window.initGraph = initGraph;
