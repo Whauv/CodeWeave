@@ -15,6 +15,9 @@ let labelSelection;
 let monacoEditor = null;
 let scanFrameTimer = null;
 let isScanning = false;
+let linkData = [];
+let nodeData = [];
+let layoutMode = "tree";
 
 function setMetricValue(id, value) {
   const element = document.getElementById(id);
@@ -85,6 +88,16 @@ function hideScanOverlay() {
   }
 }
 
+function setLayoutMode(nextMode) {
+  layoutMode = nextMode;
+  document.getElementById("tree-layout-btn")?.classList.toggle("active", nextMode === "tree");
+  document.getElementById("force-layout-btn")?.classList.toggle("active", nextMode === "force");
+  if (graphData) {
+    renderGraph(graphData);
+    restoreVisualState();
+  }
+}
+
 function getNodeRadius(node) {
   const degree = (node.incomingCount || 0) + (node.outgoingCount || 0);
   return Math.max(8, Math.min(24, 8 + degree * 1.5));
@@ -146,21 +159,150 @@ function buildSvgShell() {
   );
 }
 
-function renderGraph(data) {
-  const container = document.getElementById("graph-container");
-  const width = container.clientWidth;
-  const height = container.clientHeight;
+function buildGraphCollections(data) {
+  nodeData = data.nodes.map((node) => ({ ...node }));
+  const nodeById = new Map(nodeData.map((node) => [node.id, node]));
+  linkData = data.edges
+    .map((edge) => ({
+      source: nodeById.get(edge.source),
+      target: nodeById.get(edge.target),
+    }))
+    .filter((edge) => edge.source && edge.target);
+  return { nodes: nodeData, links: linkData, nodeById };
+}
 
-  buildSvgShell();
-
-  const links = data.edges.map((edge) => ({ ...edge }));
-  const nodes = data.nodes.map((node) => ({ ...node }));
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+function applyTreeLayout(nodes, links, width, height) {
+  const incoming = new Map(nodes.map((node) => [node.id, []]));
+  const outgoing = new Map(nodes.map((node) => [node.id, []]));
 
   links.forEach((link) => {
-    link.source = nodeById.get(link.source);
-    link.target = nodeById.get(link.target);
+    incoming.get(link.target.id)?.push(link.source.id);
+    outgoing.get(link.source.id)?.push(link.target.id);
   });
+
+  let roots = nodes.filter((node) => (incoming.get(node.id) || []).length === 0);
+  if (roots.length === 0 && nodes.length > 0) {
+    roots = [...nodes].sort((left, right) => (right.outgoingCount || 0) - (left.outgoingCount || 0)).slice(0, 1);
+  }
+
+  const depthMap = new Map();
+  const queue = roots.map((node) => ({ id: node.id, depth: 0 }));
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (depthMap.has(current.id)) {
+      continue;
+    }
+    depthMap.set(current.id, current.depth);
+    (outgoing.get(current.id) || []).forEach((childId) => {
+      if (!depthMap.has(childId)) {
+        queue.push({ id: childId, depth: current.depth + 1 });
+      }
+    });
+  }
+
+  let fallbackDepth = depthMap.size > 0 ? Math.max(...depthMap.values()) + 1 : 0;
+  nodes.forEach((node) => {
+    if (!depthMap.has(node.id)) {
+      depthMap.set(node.id, fallbackDepth);
+      fallbackDepth += 1;
+    }
+  });
+
+  const layers = new Map();
+  nodes.forEach((node) => {
+    const depth = depthMap.get(node.id) || 0;
+    if (!layers.has(depth)) {
+      layers.set(depth, []);
+    }
+    layers.get(depth).push(node);
+  });
+
+  const orderedDepths = [...layers.keys()].sort((left, right) => left - right);
+  const leftMargin = 110;
+  const rightMargin = 140;
+  const topMargin = 90;
+  const bottomMargin = 90;
+  const xStep = orderedDepths.length > 1
+    ? (width - leftMargin - rightMargin) / (orderedDepths.length - 1)
+    : 0;
+
+  orderedDepths.forEach((depth) => {
+    const layerNodes = layers.get(depth).sort((left, right) => {
+      const leftWeight = (left.outgoingCount || 0) + (left.incomingCount || 0);
+      const rightWeight = (right.outgoingCount || 0) + (right.incomingCount || 0);
+      return rightWeight - leftWeight;
+    });
+    const yStep = layerNodes.length > 1
+      ? (height - topMargin - bottomMargin) / (layerNodes.length - 1)
+      : 0;
+    layerNodes.forEach((node, index) => {
+      node.x = leftMargin + (depth * xStep);
+      node.y = layerNodes.length === 1
+        ? height / 2
+        : topMargin + (index * yStep);
+    });
+  });
+}
+
+function treePath(link) {
+  const midX = (link.source.x + link.target.x) / 2;
+  return `M${link.source.x},${link.source.y} C${midX},${link.source.y} ${midX},${link.target.y} ${link.target.x},${link.target.y}`;
+}
+
+function renderTreeGraph(data, width, height) {
+  const { nodes, links } = buildGraphCollections(data);
+  applyTreeLayout(nodes, links, width, height);
+
+  linkSelection = linkLayer
+    .selectAll("path")
+    .data(links, (link) => `${link.source.id}-${link.target.id}`)
+    .join("path")
+    .attr("d", (link) => treePath(link))
+    .attr("fill", "none")
+    .attr("stroke", "rgba(149, 193, 214, 0.34)")
+    .attr("stroke-width", 1.6)
+    .attr("marker-end", "url(#arrowhead)");
+
+  nodeSelection = nodeLayer
+    .selectAll("circle")
+    .data(nodes, (node) => node.id)
+    .join("circle")
+    .attr("cx", (node) => node.x)
+    .attr("cy", (node) => node.y)
+    .attr("r", (node) => getNodeRadius(node))
+    .attr("fill", (node) => node.mutation_color || "#7a7a7a")
+    .attr("stroke", "#111")
+    .attr("stroke-width", 2)
+    .attr("data-node-id", (node) => node.id)
+    .style("cursor", "pointer")
+    .on("click", (_, node) => {
+      selectedNodeId = node.id;
+      highlightNode(node.id);
+      window.loadNodeDetail(node, graphData);
+    })
+    .on("contextmenu", (event, node) => {
+      event.preventDefault();
+      triggerBlastRadius(node);
+    })
+    .on("dblclick", (_, node) => {
+      openMonacoModal(node.source_code || "# No source code available");
+    });
+
+  labelSelection = labelLayer
+    .selectAll("text")
+    .data(nodes, (node) => node.id)
+    .join("text")
+    .text((node) => truncateLabel(node.name))
+    .attr("x", (node) => node.x + getNodeRadius(node) + 10)
+    .attr("y", (node) => node.y + 4)
+    .attr("fill", "#d9e3e8")
+    .attr("font-size", 12)
+    .attr("text-anchor", "start")
+    .attr("pointer-events", "none");
+}
+
+function renderForceGraph(data, width, height) {
+  const { nodes, links } = buildGraphCollections(data);
 
   simulation = d3
     .forceSimulation(nodes)
@@ -170,9 +312,10 @@ function renderGraph(data) {
     .force("collide", d3.forceCollide().radius((node) => getNodeRadius(node) + 10));
 
   linkSelection = linkLayer
-    .selectAll("line")
+    .selectAll("path")
     .data(links, (link) => `${link.source.id}-${link.target.id}`)
-    .join("line")
+    .join("path")
+    .attr("fill", "none")
     .attr("stroke", "#444")
     .attr("stroke-width", 1.2)
     .attr("marker-end", "url(#arrowhead)");
@@ -218,20 +361,31 @@ function renderGraph(data) {
     .attr("pointer-events", "none");
 
   simulation.on("tick", () => {
-    linkSelection
-      .attr("x1", (link) => link.source.x)
-      .attr("y1", (link) => link.source.y)
-      .attr("x2", (link) => link.target.x)
-      .attr("y2", (link) => link.target.y);
-
+    linkSelection.attr("d", (link) => treePath(link));
     nodeSelection
       .attr("cx", (node) => node.x)
       .attr("cy", (node) => node.y);
-
     labelSelection
       .attr("x", (node) => node.x)
       .attr("y", (node) => node.y + getNodeRadius(node) + 14);
   });
+}
+
+function renderGraph(data) {
+  const container = document.getElementById("graph-container");
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+
+  buildSvgShell();
+  if (simulation) {
+    simulation.stop();
+    simulation = null;
+  }
+  if (layoutMode === "tree") {
+    renderTreeGraph(data, width, height);
+  } else {
+    renderForceGraph(data, width, height);
+  }
 }
 
 function dragStarted(event) {
@@ -267,6 +421,15 @@ function initGraph(data) {
   clearBlastRadius();
 }
 
+function restoreVisualState() {
+  if (selectedNodeId) {
+    highlightNode(selectedNodeId);
+  }
+  if (blastMode && currentBlastData) {
+    applyBlastData(currentBlastData);
+  }
+}
+
 function updateGraph(data) {
   initGraph(data);
 }
@@ -275,9 +438,46 @@ function highlightNode(nodeId) {
   selectedNodeId = nodeId;
   const selectedNode = graphData?.nodes?.find((node) => node.id === nodeId);
   setSelectedLabel(selectedNode ? selectedNode.name : "None");
+  document.getElementById("simulate-blast-btn")?.toggleAttribute("disabled", !selectedNode);
+  document.getElementById("view-source-btn")?.toggleAttribute("disabled", !selectedNode);
   nodeSelection
     .attr("stroke", (node) => (node.id === nodeId ? "#ffcc00" : "#111"))
     .attr("stroke-width", (node) => (node.id === nodeId ? 4 : 2));
+}
+
+function applyBlastData(data) {
+  blastMode = true;
+  currentBlastData = data;
+  setMode("Blast");
+  const affected = new Set(data.affected_nodes || []);
+
+  nodeSelection
+    .classed("epicenter", (d) => d.id === data.epicenter)
+    .attr("fill", (d) => data.risk_colors?.[d.id] || d.mutation_color || "#7a7a7a")
+    .attr("opacity", (d) => (affected.has(d.id) ? 1 : 0.12))
+    .attr("stroke", (d) => {
+      if (d.id === data.epicenter) {
+        return "#fff5d6";
+      }
+      return d.id === selectedNodeId ? "#ffcc00" : "#111";
+    });
+
+  labelSelection.attr("opacity", (d) => (affected.has(d.id) ? 1 : 0.14));
+  linkSelection
+    .attr("opacity", (link) => (
+      affected.has(link.source.id) && affected.has(link.target.id) ? 0.95 : 0.05
+    ))
+    .attr("stroke", (link) => (
+      affected.has(link.source.id) && affected.has(link.target.id)
+        ? "rgba(255, 190, 137, 0.65)"
+        : layoutMode === "tree"
+          ? "rgba(149, 193, 214, 0.14)"
+          : "#444"
+    ));
+
+  if (window.showBlastInfo) {
+    window.showBlastInfo(data);
+  }
 }
 
 async function triggerBlastRadius(node) {
@@ -289,25 +489,7 @@ async function triggerBlastRadius(node) {
       throw new Error(data.error || "Blast radius failed");
     }
 
-    blastMode = true;
-    currentBlastData = data;
-    setMode("Blast");
-    const affected = new Set(data.affected_nodes || []);
-
-    nodeSelection
-      .classed("epicenter", (d) => d.id === data.epicenter)
-      .attr("fill", (d) => data.risk_colors?.[d.id] || d.mutation_color || "#7a7a7a")
-      .attr("opacity", (d) => (affected.has(d.id) ? 1 : 0.15))
-      .attr("stroke", (d) => (d.id === data.epicenter ? "#fff" : "#111"));
-
-    labelSelection.attr("opacity", (d) => (affected.has(d.id) ? 1 : 0.15));
-    linkSelection.attr("opacity", (link) => (
-      affected.has(link.source.id) && affected.has(link.target.id) ? 0.9 : 0.08
-    ));
-
-    if (window.showBlastInfo) {
-      window.showBlastInfo(data);
-    }
+    applyBlastData(data);
     setStatus(data.summary);
   } catch (error) {
     console.error(error);
@@ -331,7 +513,9 @@ function clearBlastRadius() {
     .attr("stroke-width", (node) => (node.id === selectedNodeId ? 4 : 2));
 
   labelSelection.attr("opacity", 1);
-  linkSelection.attr("opacity", 0.7);
+  linkSelection
+    .attr("opacity", layoutMode === "tree" ? 0.75 : 0.7)
+    .attr("stroke", layoutMode === "tree" ? "rgba(149, 193, 214, 0.34)" : "#444");
 
   if (window.showBlastInfo) {
     window.showBlastInfo({ summary: "Right-click a node to simulate impact.", depth_map: {} });
@@ -457,10 +641,28 @@ async function scanProject() {
 document.addEventListener("DOMContentLoaded", () => {
   showEmptyState();
   document.getElementById("scan-btn").addEventListener("click", scanProject);
+  document.getElementById("tree-layout-btn").addEventListener("click", () => setLayoutMode("tree"));
+  document.getElementById("force-layout-btn").addEventListener("click", () => setLayoutMode("force"));
   document.getElementById("search-input").addEventListener("input", (event) => {
     searchNodes(event.target.value);
   });
   document.getElementById("clear-blast-btn").addEventListener("click", clearBlastRadius);
+  document.getElementById("simulate-blast-btn").addEventListener("click", () => {
+    const node = graphData?.nodes?.find((item) => item.id === selectedNodeId);
+    if (node) {
+      triggerBlastRadius(node);
+    } else {
+      setStatus("Select a node first to simulate blast radius.");
+    }
+  });
+  document.getElementById("view-source-btn").addEventListener("click", () => {
+    const node = graphData?.nodes?.find((item) => item.id === selectedNodeId);
+    if (node) {
+      openMonacoModal(node.source_code || "# No source code available");
+    } else {
+      setStatus("Select a node first to view source.");
+    }
+  });
   document.getElementById("modal-close-btn").addEventListener("click", () => {
     document.getElementById("monaco-modal").classList.remove("visible");
   });
@@ -468,15 +670,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("resize", () => {
     if (graphData) {
       renderGraph(graphData);
-      if (selectedNodeId) {
-        highlightNode(selectedNodeId);
-      }
-      if (blastMode && currentBlastData) {
-        const epicenterNode = graphData.nodes.find((node) => node.id === currentBlastData.epicenter);
-        if (epicenterNode) {
-          triggerBlastRadius(epicenterNode);
-        }
-      }
+      restoreVisualState();
     }
     if (monacoEditor) {
       monacoEditor.layout();

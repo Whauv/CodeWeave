@@ -43,6 +43,8 @@ async function loadNodeDetail(node, graphData) {
     document.getElementById("mutation-badge").innerHTML = getMutationBadgeHTML(data.mutation_status);
     document.getElementById("churn-info").textContent =
       `Churn: ${data.churn_count || 0} commits | Last: ${data.last_modified_commit || "N/A"}`;
+    document.getElementById("simulate-blast-btn")?.removeAttribute("disabled");
+    document.getElementById("view-source-btn")?.removeAttribute("disabled");
 
     const callersContainer = document.getElementById("callers-list");
     const calleesContainer = document.getElementById("callees-list");
@@ -122,6 +124,8 @@ function showBlastInfo(blastData) {
 function hidePanel() {
   document.getElementById("detail-panel").classList.add("hidden");
   document.getElementById("detail-shell").classList.add("hidden");
+  document.getElementById("simulate-blast-btn")?.setAttribute("disabled", "disabled");
+  document.getElementById("view-source-btn")?.setAttribute("disabled", "disabled");
 }
 
 document.addEventListener("DOMContentLoaded", () => {
