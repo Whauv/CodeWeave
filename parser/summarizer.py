@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import Iterable
 
 from groq import Groq
 
@@ -13,7 +14,9 @@ logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
 CACHE_PATH = Path(__file__).resolve().parents[1] / "summaries_cache.json"
-MODEL_NAME = "llama3-8b-8192"
+MODEL_NAME = "llama-3.1-8b-instant"
+MAX_BATCH_SIZE = 12
+MAX_SOURCE_CHARS = 1600
 
 
 def get_node_id(file_path: str, function_name: str) -> str:
@@ -39,13 +42,77 @@ def _save_cache(cache: dict[str, str]) -> None:
         LOGGER.warning("Failed to save summary cache: %s", exc)
 
 
+def _get_client() -> Groq | None:
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return None
+    return Groq(api_key=api_key)
+
+
+def _trim_source(source_code: str) -> str:
+    normalized = source_code.strip()
+    if len(normalized) <= MAX_SOURCE_CHARS:
+        return normalized
+    return f"{normalized[:MAX_SOURCE_CHARS]}\n# ...truncated..."
+
+
+def _chunk_nodes(nodes: list[dict[str, str]], chunk_size: int) -> Iterable[list[dict[str, str]]]:
+    for index in range(0, len(nodes), chunk_size):
+        yield nodes[index:index + chunk_size]
+
+
+def summarize_nodes(nodes: list[dict[str, str]]) -> dict[str, str]:
+    cache = _load_cache()
+    pending_nodes = [node for node in nodes if node.get("id") and node["id"] not in cache]
+    if not pending_nodes:
+        return {node["id"]: cache.get(node["id"], "No summary available.") for node in nodes if node.get("id")}
+
+    client = _get_client()
+    if client is None:
+        return {node["id"]: cache.get(node["id"], "No summary available.") for node in nodes if node.get("id")}
+
+    for batch in _chunk_nodes(pending_nodes, MAX_BATCH_SIZE):
+        prompt_lines = [
+            "Summarize each Python function below in one concise sentence of at most 20 words.",
+            "Return valid JSON only as an object mapping each id to its summary.",
+        ]
+        for node in batch:
+            prompt_lines.append(f"ID: {node['id']}")
+            prompt_lines.append(_trim_source(node.get("source_code", "")))
+            prompt_lines.append("")
+        prompt = "\n".join(prompt_lines)
+
+        try:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=400,
+                temperature=0.2,
+                response_format={"type": "json_object"},
+            )
+            content = response.choices[0].message.content.strip() if response.choices else "{}"
+            parsed = json.loads(content or "{}")
+            for node in batch:
+                node_id = node["id"]
+                summary = parsed.get(node_id) or "No summary available."
+                cache[node_id] = str(summary).strip() or "No summary available."
+        except Exception as exc:
+            failed_ids = ", ".join(node["id"] for node in batch)
+            LOGGER.error("Groq batch summarization failed for [%s]: %s", failed_ids, exc)
+            for node in batch:
+                cache.setdefault(node["id"], "No summary available.")
+
+    _save_cache(cache)
+    return {node["id"]: cache.get(node["id"], "No summary available.") for node in nodes if node.get("id")}
+
+
 def summarize_node(source_code: str, node_id: str) -> str:
     cache = _load_cache()
     if node_id in cache:
         return cache[node_id]
 
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
+    client = _get_client()
+    if client is None:
         return "No summary available."
 
     prompt = (
@@ -54,7 +121,6 @@ def summarize_node(source_code: str, node_id: str) -> str:
     )
 
     try:
-        client = Groq(api_key=api_key)
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],

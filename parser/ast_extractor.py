@@ -14,6 +14,25 @@ import networkx as nx
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
+SKIP_DIRECTORIES = {
+    ".git",
+    ".hg",
+    ".idea",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "env",
+    "htmlcov",
+    "node_modules",
+    "site-packages",
+    "venv",
+}
+
 
 @dataclass
 class NodeRecord:
@@ -55,7 +74,11 @@ def _iter_python_files(root_path: str) -> Iterable[Path]:
     if not root.exists():
         LOGGER.warning("Root path does not exist: %s", root_path)
         return []
-    return root.rglob("*.py")
+    return (
+        file_path
+        for file_path in root.rglob("*.py")
+        if not any(part in SKIP_DIRECTORIES for part in file_path.parts)
+    )
 
 
 def _extract_args(function_node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
@@ -112,8 +135,17 @@ def _build_class_record(file_path: str, node: ast.ClassDef) -> NodeRecord:
 
 
 def _parse_file(file_path: Path) -> ast.AST | None:
+    encodings = ("utf-8", "utf-8-sig", "latin-1")
     try:
-        source = file_path.read_text(encoding="utf-8")
+        source = ""
+        for encoding in encodings:
+            try:
+                source = file_path.read_text(encoding=encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            source = file_path.read_text(encoding="utf-8", errors="ignore")
         return ast.parse(source, filename=str(file_path))
     except Exception as exc:
         LOGGER.warning("Skipping unparseable file %s: %s", file_path, exc)
