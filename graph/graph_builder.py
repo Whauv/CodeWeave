@@ -13,14 +13,22 @@ from parser import ast_extractor, summarizer
 
 def build_graph(root_path: str) -> dict[str, list[dict[str, Any]]]:
     graph_data = ast_extractor.extract(root_path)
+    function_nodes: list[dict[str, str]] = []
     for node in graph_data.get("nodes", []):
         if node.get("type") == "function":
-            node["summary"] = summarizer.summarize_node(
-                node.get("source_code", ""),
-                node.get("id", ""),
+            function_nodes.append(
+                {
+                    "id": node.get("id", ""),
+                    "source_code": node.get("source_code", ""),
+                }
             )
         else:
             node["summary"] = "Class definition and methods."
+
+    summaries = summarizer.summarize_nodes(function_nodes)
+    for node in graph_data.get("nodes", []):
+        if node.get("type") == "function":
+            node["summary"] = summaries.get(node.get("id", ""), "No summary available.")
     return graph_data
 
 

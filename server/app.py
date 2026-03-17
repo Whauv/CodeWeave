@@ -35,11 +35,12 @@ def scan_project() -> Any:
     try:
         payload = request.get_json(silent=True) or {}
         project_path = payload.get("path")
-        if not project_path or not Path(project_path).exists():
+        resolved_path = Path(project_path).expanduser().resolve() if project_path else None
+        if resolved_path is None or not resolved_path.exists() or not resolved_path.is_dir():
             return jsonify({"error": "Invalid project path"}), 400
 
-        graph_data = graph_builder.build_graph(project_path)
-        graph_data["nodes"] = mutation_tracker.track_mutations(project_path, graph_data.get("nodes", []))
+        graph_data = graph_builder.build_graph(str(resolved_path))
+        graph_data["nodes"] = mutation_tracker.track_mutations(str(resolved_path), graph_data.get("nodes", []))
         GRAPH_CACHE = graph_data
         return jsonify(graph_data)
     except Exception as exc:

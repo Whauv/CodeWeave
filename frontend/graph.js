@@ -13,6 +13,8 @@ let linkSelection;
 let nodeSelection;
 let labelSelection;
 let monacoEditor = null;
+let scanFrameTimer = null;
+let isScanning = false;
 
 function setMetricValue(id, value) {
   const element = document.getElementById(id);
@@ -47,6 +49,40 @@ function showEmptyState() {
 
 function hideEmptyState() {
   document.getElementById("graph-empty-state")?.classList.add("hidden");
+}
+
+function setScanOverlayMessage(message) {
+  const copy = document.getElementById("scan-overlay-copy");
+  if (copy) {
+    copy.textContent = message;
+  }
+}
+
+function showScanOverlay() {
+  const overlay = document.getElementById("scan-overlay");
+  overlay?.classList.add("visible");
+  const frames = [
+    "Parsing Python files, linking calls, and preparing the dependency map.",
+    "Resolving functions, classes, and import relationships.",
+    "Batching summaries and enriching the graph for the UI.",
+  ];
+  let frameIndex = 0;
+  setScanOverlayMessage(frames[frameIndex]);
+  if (scanFrameTimer) {
+    window.clearInterval(scanFrameTimer);
+  }
+  scanFrameTimer = window.setInterval(() => {
+    frameIndex = (frameIndex + 1) % frames.length;
+    setScanOverlayMessage(frames[frameIndex]);
+  }, 1200);
+}
+
+function hideScanOverlay() {
+  document.getElementById("scan-overlay")?.classList.remove("visible");
+  if (scanFrameTimer) {
+    window.clearInterval(scanFrameTimer);
+    scanFrameTimer = null;
+  }
 }
 
 function getNodeRadius(node) {
@@ -378,6 +414,10 @@ async function openMonacoModal(source) {
 }
 
 async function scanProject() {
+  if (isScanning) {
+    return;
+  }
+
   const input = document.getElementById("path-input");
   const path = input.value.trim();
   if (!path) {
@@ -386,8 +426,10 @@ async function scanProject() {
   }
 
   try {
+    isScanning = true;
     setStatus("Scanning project...");
     setMode("Scan");
+    showScanOverlay();
     const response = await fetch("/api/scan", {
       method: "POST",
       headers: {
@@ -406,6 +448,9 @@ async function scanProject() {
     console.error(error);
     setStatus(error.message);
     setMode("Error");
+  } finally {
+    isScanning = false;
+    hideScanOverlay();
   }
 }
 
