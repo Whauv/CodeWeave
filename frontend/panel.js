@@ -3,9 +3,15 @@ function getNodeById(nodeId, graphData) {
 }
 
 let activeChatNodeId = null;
-let chatHistory = [];
+let chatSessions = [];
+let activeChatSessionId = null;
 let isChatRequestInFlight = false;
 const DEFAULT_CHAT_PROVIDER = "groq";
+const CHAT_STORAGE_KEY = "codeweave-chat-sessions-v1";
+
+function makeSessionId() {
+  return `chat_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+}
 
 function getChatElements() {
   return {
@@ -13,7 +19,107 @@ function getChatElements() {
     input: document.getElementById("chat-input"),
     sendButton: document.getElementById("chat-send-btn"),
     hint: document.getElementById("chat-hint"),
+    newButton: document.getElementById("chat-new-btn"),
+    sessionBar: document.getElementById("chat-session-bar"),
   };
+}
+
+function getActiveChatSession() {
+  return chatSessions.find((session) => session.id === activeChatSessionId) || null;
+}
+
+function loadStoredChatSessions() {
+  try {
+    const raw = window.localStorage.getItem(CHAT_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    chatSessions = Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error(error);
+    chatSessions = [];
+  }
+}
+
+function persistChatSessions() {
+  window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatSessions));
+}
+
+function buildSessionTitle(nodeName, firstUserMessage = "") {
+  if (firstUserMessage) {
+    return firstUserMessage.length > 28 ? `${firstUserMessage.slice(0, 28)}...` : firstUserMessage;
+  }
+  return nodeName ? `${nodeName} thread` : "Project thread";
+}
+
+function createChatSession(nodeId, nodeName) {
+  const session = {
+    id: makeSessionId(),
+    nodeId: nodeId || null,
+    nodeName: nodeName || "Project",
+    title: buildSessionTitle(nodeName || "Project"),
+    updatedAt: Date.now(),
+    messages: [
+      {
+        role: "assistant",
+        content: `Ready to help with ${nodeName || "this project"}. Ask about logic, dependencies, risks, or impact.`,
+      },
+    ],
+  };
+  chatSessions.unshift(session);
+  activeChatSessionId = session.id;
+  persistChatSessions();
+  return session;
+}
+
+function activateChatSession(sessionId) {
+  activeChatSessionId = sessionId;
+  const session = getActiveChatSession();
+  if (session) {
+    activeChatNodeId = session.nodeId || null;
+  }
+  renderChatSessions();
+  renderChatMessages();
+}
+
+function ensureChatSession(nodeId, nodeName) {
+  const matchingSession = chatSessions.find((session) => session.nodeId === nodeId);
+  if (matchingSession) {
+    activeChatSessionId = matchingSession.id;
+    activeChatNodeId = matchingSession.nodeId;
+    return matchingSession;
+  }
+  return createChatSession(nodeId, nodeName);
+}
+
+function renderChatSessions() {
+  const { sessionBar } = getChatElements();
+  if (!sessionBar) {
+    return;
+  }
+
+  sessionBar.innerHTML = "";
+  if (chatSessions.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "chat-session-empty";
+    empty.textContent = "Your saved chat threads will appear here.";
+    sessionBar.appendChild(empty);
+    return;
+  }
+
+  chatSessions
+    .slice()
+    .sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0))
+    .forEach((session) => {
+      const button = document.createElement("button");
+      button.className = `chat-session-chip ${session.id === activeChatSessionId ? "active" : ""}`;
+      button.innerHTML = `
+        <span class="chat-session-label">${session.title || "Untitled thread"}</span>
+        <span class="chat-session-meta">${session.nodeName || "Project"}</span>
+      `;
+      button.addEventListener("click", () => {
+        activateChatSession(session.id);
+      });
+      sessionBar.appendChild(button);
+    });
 }
 
 function renderChatMessages() {
@@ -22,14 +128,15 @@ function renderChatMessages() {
     return;
   }
 
+  const activeSession = getActiveChatSession();
   messages.innerHTML = "";
-  if (chatHistory.length === 0) {
+  if (!activeSession || !Array.isArray(activeSession.messages) || activeSession.messages.length === 0) {
     const empty = document.createElement("div");
     empty.className = "chat-empty";
     empty.textContent = "Ask about the selected node or overall project architecture.";
     messages.appendChild(empty);
   } else {
-    chatHistory.forEach((item) => {
+    activeSession.messages.forEach((item) => {
       const message = document.createElement("div");
       message.className = `chat-message ${item.role === "assistant" ? "assistant" : "user"}`;
       message.textContent = item.content;
@@ -45,28 +152,27 @@ function renderChatMessages() {
 }
 
 function resetChatForNode(nodeId, nodeName) {
-  if (!nodeId || activeChatNodeId === nodeId) {
+  if (!nodeId) {
     return;
   }
   activeChatNodeId = nodeId;
-  chatHistory = [
-    {
-      role: "assistant",
-      content: `Ready to help with ${nodeName || "this node"}. Ask about logic, dependencies, risks, or impact.`,
-    },
-  ];
+  ensureChatSession(nodeId, nodeName);
+  renderChatSessions();
   renderChatMessages();
 }
 
 function setChatPending(isPending) {
   isChatRequestInFlight = isPending;
-  const { input, sendButton } = getChatElements();
+  const { input, sendButton, newButton } = getChatElements();
   if (input) {
     input.disabled = isPending;
   }
   if (sendButton) {
     sendButton.disabled = isPending;
     sendButton.textContent = isPending ? "Thinking..." : "Ask AI";
+  }
+  if (newButton) {
+    newButton.disabled = isPending;
   }
 }
 
@@ -81,8 +187,18 @@ async function submitChatMessage() {
     return;
   }
 
-  chatHistory.push({ role: "user", content: message });
+  let activeSession = getActiveChatSession();
+  if (!activeSession) {
+    activeSession = createChatSession(activeChatNodeId, activeChatNodeId ? "Selected node" : "Project");
+  }
+  if (!activeSession.title || activeSession.title.endsWith("thread")) {
+    activeSession.title = buildSessionTitle(activeSession.nodeName, message);
+  }
+  activeSession.messages.push({ role: "user", content: message });
+  activeSession.updatedAt = Date.now();
   input.value = "";
+  persistChatSessions();
+  renderChatSessions();
   renderChatMessages();
   setChatPending(true);
 
@@ -94,37 +210,56 @@ async function submitChatMessage() {
       },
       body: JSON.stringify({
         message,
-        node_id: activeChatNodeId,
+        node_id: activeSession.nodeId || activeChatNodeId,
         provider: DEFAULT_CHAT_PROVIDER,
-        history: chatHistory,
+        history: activeSession.messages,
       }),
     });
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.error || "Chat request failed");
     }
-    chatHistory.push({
+    activeSession.messages.push({
       role: "assistant",
       content: data.answer || "No response generated.",
     });
   } catch (error) {
-    chatHistory.push({
+    activeSession.messages.push({
       role: "assistant",
       content: `Could not answer right now: ${error.message}`,
     });
   } finally {
+    activeSession.updatedAt = Date.now();
+    persistChatSessions();
     setChatPending(false);
+    renderChatSessions();
     renderChatMessages();
   }
 }
 
+function createNewChatFromCurrentContext() {
+  const nodeName = document.getElementById("node-name")?.textContent?.trim() || "Project";
+  const session = createChatSession(activeChatNodeId, activeChatNodeId ? nodeName : "Project");
+  renderChatSessions();
+  renderChatMessages();
+  getChatElements().input?.focus();
+  return session;
+}
+
 function initializeChatUi() {
-  const { input, sendButton } = getChatElements();
-  if (!input || !sendButton) {
+  const { input, sendButton, newButton } = getChatElements();
+  if (!input || !sendButton || !newButton) {
     return;
   }
 
+  loadStoredChatSessions();
+  if (chatSessions.length > 0) {
+    activeChatSessionId = chatSessions[0].id;
+    activeChatNodeId = chatSessions[0].nodeId || null;
+  }
+
   sendButton.addEventListener("click", submitChatMessage);
+  newButton.addEventListener("click", createNewChatFromCurrentContext);
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -132,6 +267,7 @@ function initializeChatUi() {
     }
   });
 
+  renderChatSessions();
   renderChatMessages();
 }
 

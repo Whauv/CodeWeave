@@ -796,6 +796,79 @@
       overflow: hidden;
     }
 
+    .chat-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .chat-toolbar-title {
+      font-size: 0.82rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .chat-session-bar {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .chat-session-empty {
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.4;
+    }
+
+    .chat-session-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 220px;
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      cursor: pointer;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+
+    .chat-session-chip.active {
+      border-color: rgba(255, 140, 66, 0.35);
+      background: rgba(255, 140, 66, 0.12);
+      color: var(--accent-soft);
+    }
+
+    body[data-theme="light"] .chat-session-chip.active {
+      border-color: rgba(21, 112, 239, 0.28);
+      background: rgba(21, 112, 239, 0.12);
+      color: var(--accent);
+    }
+
+    .chat-session-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 0.84rem;
+    }
+
+    .chat-session-meta {
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
     .chat-messages {
       max-height: 260px;
       min-height: 120px;
@@ -1163,6 +1236,13 @@
           <div class="panel-card">
             <div class="panel-label">Node chat</div>
             <div class="chat-shell">
+              <div class="chat-toolbar">
+                <div class="chat-toolbar-title">Saved conversations</div>
+                <button id="chat-new-btn" class="panel-action">New Chat</button>
+              </div>
+              <div id="chat-session-bar" class="chat-session-bar">
+                <div class="chat-session-empty">Your saved chat threads will appear here.</div>
+              </div>
               <div id="chat-messages" class="chat-messages">
                 <div class="chat-empty">Ask about the selected node or overall project architecture.</div>
               </div>
