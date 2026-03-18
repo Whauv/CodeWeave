@@ -25,6 +25,14 @@ function getSelectedNode() {
   return graphData?.nodes?.find((node) => node.id === selectedNodeId) || null;
 }
 
+function getTooltipElements() {
+  return {
+    container: document.getElementById("node-tooltip"),
+    title: document.getElementById("node-tooltip-title"),
+    body: document.getElementById("node-tooltip-body"),
+  };
+}
+
 function setMetricValue(id, value) {
   const element = document.getElementById(id);
   if (element) {
@@ -115,6 +123,49 @@ function setLayoutMode(nextMode) {
     renderGraph(graphData);
     restoreVisualState();
   }
+}
+
+function showNodeTooltip(node, event) {
+  const { container, title, body } = getTooltipElements();
+  if (!container || !title || !body) {
+    return;
+  }
+
+  title.textContent = node.name || "Node";
+  body.textContent = node.summary || "No summary available.";
+  container.classList.add("visible");
+  moveNodeTooltip(event);
+}
+
+function moveNodeTooltip(event) {
+  const { container } = getTooltipElements();
+  const graphContainer = document.getElementById("graph-container");
+  if (!container || !graphContainer) {
+    return;
+  }
+
+  const bounds = graphContainer.getBoundingClientRect();
+  const offsetX = 18;
+  const offsetY = 18;
+  const tooltipWidth = container.offsetWidth || 280;
+  const tooltipHeight = container.offsetHeight || 80;
+  let left = event.clientX - bounds.left + offsetX;
+  let top = event.clientY - bounds.top + offsetY;
+
+  if (left + tooltipWidth > bounds.width - 12) {
+    left = bounds.width - tooltipWidth - 12;
+  }
+  if (top + tooltipHeight > bounds.height - 12) {
+    top = bounds.height - tooltipHeight - 12;
+  }
+
+  container.style.left = `${Math.max(12, left)}px`;
+  container.style.top = `${Math.max(12, top)}px`;
+}
+
+function hideNodeTooltip() {
+  const { container } = getTooltipElements();
+  container?.classList.remove("visible");
 }
 
 function applyTheme(nextTheme, persist = true) {
@@ -311,6 +362,15 @@ function renderTreeGraph(data, width, height) {
       highlightNode(node.id);
       window.loadNodeDetail(node, graphData);
     })
+    .on("mouseenter", (event, node) => {
+      showNodeTooltip(node, event);
+    })
+    .on("mousemove", (event) => {
+      moveNodeTooltip(event);
+    })
+    .on("mouseleave", () => {
+      hideNodeTooltip();
+    })
     .on("contextmenu", (event, node) => {
       event.preventDefault();
       triggerBlastRadius(node);
@@ -365,6 +425,15 @@ function renderForceGraph(data, width, height) {
       selectedNodeId = node.id;
       highlightNode(node.id);
       window.loadNodeDetail(node, graphData);
+    })
+    .on("mouseenter", (event, node) => {
+      showNodeTooltip(node, event);
+    })
+    .on("mousemove", (event) => {
+      moveNodeTooltip(event);
+    })
+    .on("mouseleave", () => {
+      hideNodeTooltip();
     })
     .on("contextmenu", (event, node) => {
       event.preventDefault();
@@ -713,6 +782,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   window.addEventListener("resize", () => {
+    hideNodeTooltip();
     if (graphData) {
       renderGraph(graphData);
       restoreVisualState();
