@@ -180,6 +180,26 @@ function applyTheme(nextTheme, persist = true) {
   }
 }
 
+function getThemeColor(variableName, fallback) {
+  const value = window.getComputedStyle(document.body).getPropertyValue(variableName).trim();
+  return value || fallback;
+}
+
+function getGraphPalette() {
+  return {
+    nodeStroke: getThemeColor("--graph-node-stroke", "#111111"),
+    nodeSelected: getThemeColor("--graph-node-selected", "#ffcc00"),
+    linkTree: getThemeColor("--graph-link", "rgba(149, 193, 214, 0.34)"),
+    linkTreeMuted: getThemeColor("--graph-link-muted", "rgba(149, 193, 214, 0.14)"),
+    linkForce: getThemeColor("--graph-link-force", "#444444"),
+    label: getThemeColor("--graph-label", "#d9e3e8"),
+  };
+}
+
+function getMonacoTheme() {
+  return themeMode === "light" ? "vs" : "vs-dark";
+}
+
 function getNodeRadius(node) {
   const degree = (node.incomingCount || 0) + (node.outgoingCount || 0);
   return Math.max(8, Math.min(24, 8 + degree * 1.5));
@@ -333,6 +353,7 @@ function treePath(link) {
 
 function renderTreeGraph(data, width, height) {
   const { nodes, links } = buildGraphCollections(data);
+  const palette = getGraphPalette();
   applyTreeLayout(nodes, links, width, height);
 
   linkSelection = linkLayer
@@ -341,7 +362,7 @@ function renderTreeGraph(data, width, height) {
     .join("path")
     .attr("d", (link) => treePath(link))
     .attr("fill", "none")
-    .attr("stroke", "rgba(149, 193, 214, 0.34)")
+    .attr("stroke", palette.linkTree)
     .attr("stroke-width", 1.6)
     .attr("marker-end", "url(#arrowhead)");
 
@@ -353,7 +374,7 @@ function renderTreeGraph(data, width, height) {
     .attr("cy", (node) => node.y)
     .attr("r", (node) => getNodeRadius(node))
     .attr("fill", (node) => node.mutation_color || "#7a7a7a")
-    .attr("stroke", "#111")
+    .attr("stroke", palette.nodeStroke)
     .attr("stroke-width", 2)
     .attr("data-node-id", (node) => node.id)
     .style("cursor", "pointer")
@@ -386,7 +407,7 @@ function renderTreeGraph(data, width, height) {
     .text((node) => truncateLabel(node.name))
     .attr("x", (node) => node.x + getNodeRadius(node) + 10)
     .attr("y", (node) => node.y + 4)
-    .attr("fill", "#d9e3e8")
+    .attr("fill", palette.label)
     .attr("font-size", 12)
     .attr("text-anchor", "start")
     .attr("pointer-events", "none");
@@ -394,6 +415,7 @@ function renderTreeGraph(data, width, height) {
 
 function renderForceGraph(data, width, height) {
   const { nodes, links } = buildGraphCollections(data);
+  const palette = getGraphPalette();
 
   simulation = d3
     .forceSimulation(nodes)
@@ -407,7 +429,7 @@ function renderForceGraph(data, width, height) {
     .data(links, (link) => `${link.source.id}-${link.target.id}`)
     .join("path")
     .attr("fill", "none")
-    .attr("stroke", "#444")
+    .attr("stroke", palette.linkForce)
     .attr("stroke-width", 1.2)
     .attr("marker-end", "url(#arrowhead)");
 
@@ -417,7 +439,7 @@ function renderForceGraph(data, width, height) {
     .join("circle")
     .attr("r", (node) => getNodeRadius(node))
     .attr("fill", (node) => node.mutation_color || "#7a7a7a")
-    .attr("stroke", "#111")
+    .attr("stroke", palette.nodeStroke)
     .attr("stroke-width", 2)
     .attr("data-node-id", (node) => node.id)
     .style("cursor", "pointer")
@@ -455,7 +477,7 @@ function renderForceGraph(data, width, height) {
     .data(nodes, (node) => node.id)
     .join("text")
     .text((node) => truncateLabel(node.name))
-    .attr("fill", "#ddd")
+    .attr("fill", palette.label)
     .attr("font-size", 12)
     .attr("text-anchor", "middle")
     .attr("pointer-events", "none");
@@ -536,16 +558,18 @@ function updateGraph(data) {
 }
 
 function highlightNode(nodeId) {
+  const palette = getGraphPalette();
   selectedNodeId = nodeId;
   const selectedNode = getSelectedNode();
   setSelectedLabel(selectedNode ? selectedNode.name : "None");
   syncActionButtons();
   nodeSelection
-    .attr("stroke", (node) => (node.id === nodeId ? "#ffcc00" : "#111"))
+    .attr("stroke", (node) => (node.id === nodeId ? palette.nodeSelected : palette.nodeStroke))
     .attr("stroke-width", (node) => (node.id === nodeId ? 4 : 2));
 }
 
 function applyBlastData(data) {
+  const palette = getGraphPalette();
   blastMode = true;
   currentBlastData = data;
   setMode("Blast");
@@ -559,7 +583,7 @@ function applyBlastData(data) {
       if (d.id === data.epicenter) {
         return "#fff5d6";
       }
-      return d.id === selectedNodeId ? "#ffcc00" : "#111";
+      return d.id === selectedNodeId ? palette.nodeSelected : palette.nodeStroke;
     });
 
   labelSelection.attr("opacity", (d) => (affected.has(d.id) ? 1 : 0.14));
@@ -571,8 +595,8 @@ function applyBlastData(data) {
       affected.has(link.source.id) && affected.has(link.target.id)
         ? "rgba(255, 190, 137, 0.65)"
         : layoutMode === "tree"
-          ? "rgba(149, 193, 214, 0.14)"
-          : "#444"
+          ? palette.linkTreeMuted
+          : palette.linkForce
     ));
 
   if (window.showBlastInfo) {
@@ -607,6 +631,7 @@ async function triggerBlastRadius(node) {
 }
 
 function clearBlastRadius() {
+  const palette = getGraphPalette();
   blastMode = false;
   currentBlastData = null;
   setMode("Explore");
@@ -618,13 +643,13 @@ function clearBlastRadius() {
     .classed("epicenter", false)
     .attr("fill", (node) => node.mutation_color || "#7a7a7a")
     .attr("opacity", 1)
-    .attr("stroke", (node) => (node.id === selectedNodeId ? "#ffcc00" : "#111"))
+    .attr("stroke", (node) => (node.id === selectedNodeId ? palette.nodeSelected : palette.nodeStroke))
     .attr("stroke-width", (node) => (node.id === selectedNodeId ? 4 : 2));
 
   labelSelection.attr("opacity", 1);
   linkSelection
     .attr("opacity", layoutMode === "tree" ? 0.75 : 0.7)
-    .attr("stroke", layoutMode === "tree" ? "rgba(149, 193, 214, 0.34)" : "#444");
+    .attr("stroke", layoutMode === "tree" ? palette.linkTree : palette.linkForce);
 
   if (window.showBlastInfo) {
     window.showBlastInfo({ summary: "Right-click a node to simulate impact.", depth_map: {} });
@@ -633,6 +658,7 @@ function clearBlastRadius() {
 }
 
 function searchNodes(query) {
+  const palette = getGraphPalette();
   if (!graphData || !nodeSelection) {
     return;
   }
@@ -644,7 +670,7 @@ function searchNodes(query) {
       .attr("opacity", blastMode && currentBlastData
         ? (d) => (currentBlastData.affected_nodes || []).includes(d.id) ? 1 : 0.15
         : 1)
-      .attr("stroke", (d) => (d.id === selectedNodeId ? "#ffcc00" : "#111"))
+      .attr("stroke", (d) => (d.id === selectedNodeId ? palette.nodeSelected : palette.nodeStroke))
       .attr("stroke-width", (d) => (d.id === selectedNodeId ? 4 : 2));
     labelSelection.attr("opacity", blastMode && currentBlastData
       ? (d) => (currentBlastData.affected_nodes || []).includes(d.id) ? 1 : 0.15
@@ -663,7 +689,7 @@ function searchNodes(query) {
 
   nodeSelection
     .attr("opacity", (node) => (matches.has(node.id) ? 1 : 0.2))
-    .attr("stroke", (node) => (matches.has(node.id) ? "#ffcc00" : "#111"))
+    .attr("stroke", (node) => (matches.has(node.id) ? palette.nodeSelected : palette.nodeStroke))
     .attr("stroke-width", (node) => (matches.has(node.id) ? 4 : 2));
 
   labelSelection.attr("opacity", (node) => (matches.has(node.id) ? 1 : 0.2));
@@ -689,7 +715,7 @@ function ensureMonaco(sourceCode) {
         value: sourceCode,
         language: "python",
         readOnly: true,
-        theme: "vs-dark",
+        theme: getMonacoTheme(),
         minimap: { enabled: false },
         fontSize: 14,
       });
@@ -715,7 +741,7 @@ async function scanProject() {
   const input = document.getElementById("path-input");
   const path = input.value.trim();
   if (!path) {
-    setStatus("Enter an absolute project path.");
+    setStatus("Enter an absolute project path or GitHub repository URL.");
     return;
   }
 
@@ -756,6 +782,13 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("force-layout-btn").addEventListener("click", () => setLayoutMode("force"));
   document.getElementById("theme-toggle-btn").addEventListener("click", () => {
     applyTheme(themeMode === "dark" ? "light" : "dark");
+    if (graphData) {
+      renderGraph(graphData);
+      restoreVisualState();
+    }
+    if (window.monaco) {
+      window.monaco.editor.setTheme(getMonacoTheme());
+    }
   });
   document.getElementById("search-input").addEventListener("input", (event) => {
     searchNodes(event.target.value);

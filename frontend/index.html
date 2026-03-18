@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -18,6 +19,13 @@
       --accent-soft: #f5c85b;
       --accent-cool: #66d7d1;
       --danger: #ff5b4d;
+      --summary-text: #f6dfb8;
+      --graph-link: rgba(149, 193, 214, 0.34);
+      --graph-link-muted: rgba(149, 193, 214, 0.14);
+      --graph-link-force: #444444;
+      --graph-label: #d9e3e8;
+      --graph-node-stroke: #111111;
+      --graph-node-selected: #ffcc00;
       --shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
     }
 
@@ -34,6 +42,13 @@
       --accent-soft: #7cc4fa;
       --accent-cool: #0ea5a4;
       --danger: #d93f52;
+      --summary-text: #1f455f;
+      --graph-link: rgba(56, 101, 134, 0.5);
+      --graph-link-muted: rgba(56, 101, 134, 0.24);
+      --graph-link-force: #6d8293;
+      --graph-label: #173a54;
+      --graph-node-stroke: #45627a;
+      --graph-node-selected: #1570ef;
       --shadow: 0 24px 60px rgba(28, 65, 93, 0.12);
     }
 
@@ -153,13 +168,27 @@
     }
 
     @keyframes orbitSpin {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
+      from {
+        transform: rotate(0deg);
+      }
+
+      to {
+        transform: rotate(360deg);
+      }
     }
 
     @keyframes corePulse {
-      0%, 100% { transform: scale(0.9); opacity: 0.8; }
-      50% { transform: scale(1.08); opacity: 1; }
+
+      0%,
+      100% {
+        transform: scale(0.9);
+        opacity: 0.8;
+      }
+
+      50% {
+        transform: scale(1.08);
+        opacity: 1;
+      }
     }
 
     .scan-title {
@@ -637,7 +666,7 @@
 
     #node-summary {
       line-height: 1.65;
-      color: #f6dfb8;
+      color: var(--summary-text);
       font-size: 1rem;
     }
 
@@ -721,9 +750,17 @@
     }
 
     @keyframes epicenterPulse {
-      0% { filter: drop-shadow(0 0 4px rgba(255, 91, 77, 0.3)); }
-      50% { filter: drop-shadow(0 0 14px rgba(255, 91, 77, 0.95)); }
-      100% { filter: drop-shadow(0 0 4px rgba(255, 91, 77, 0.3)); }
+      0% {
+        filter: drop-shadow(0 0 4px rgba(255, 91, 77, 0.3));
+      }
+
+      50% {
+        filter: drop-shadow(0 0 14px rgba(255, 91, 77, 0.95));
+      }
+
+      100% {
+        filter: drop-shadow(0 0 4px rgba(255, 91, 77, 0.3));
+      }
     }
 
     .depth-group {
@@ -750,6 +787,95 @@
       padding: 0 12px 12px;
       display: grid;
       gap: 8px;
+    }
+
+    .chat-shell {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.02);
+      overflow: hidden;
+    }
+
+    .chat-messages {
+      max-height: 260px;
+      min-height: 120px;
+      overflow-y: auto;
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+    }
+
+    .chat-empty {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    .chat-message {
+      padding: 10px 11px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      line-height: 1.45;
+      border: 1px solid var(--border);
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+
+    .chat-message.user {
+      background: rgba(255, 140, 66, 0.16);
+      border-color: rgba(255, 140, 66, 0.35);
+    }
+
+    .chat-message.assistant {
+      background: rgba(102, 215, 209, 0.12);
+      border-color: rgba(102, 215, 209, 0.28);
+    }
+
+    body[data-theme="light"] .chat-message.user {
+      background: rgba(21, 112, 239, 0.12);
+      border-color: rgba(21, 112, 239, 0.3);
+    }
+
+    body[data-theme="light"] .chat-message.assistant {
+      background: rgba(14, 165, 164, 0.12);
+      border-color: rgba(14, 165, 164, 0.3);
+    }
+
+    .chat-composer {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      padding: 10px;
+      border-top: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    #chat-input {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.02);
+      color: var(--text);
+      padding: 10px;
+      font: inherit;
+      min-height: 42px;
+      resize: vertical;
+      max-height: 140px;
+    }
+
+    #chat-input:focus {
+      outline: 0;
+      border-color: var(--border-strong);
+    }
+
+    #chat-send-btn {
+      min-width: 96px;
+    }
+
+    .chat-hint {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.4;
     }
 
     #monaco-modal {
@@ -881,6 +1007,7 @@
     }
   </style>
 </head>
+
 <body>
   <div class="shell">
     <section class="top-frame">
@@ -890,7 +1017,8 @@
           <h1 class="brand-title">CodeMapper</h1>
         </div>
         <p class="brand-copy">
-          Scan a Python repository, trace live relationships, inspect mutation hotspots, and simulate impact before you change code.
+          Scan a Python repository, trace live relationships, inspect mutation hotspots, and simulate impact before you
+          change code.
         </p>
       </div>
 
@@ -898,7 +1026,7 @@
         <div class="control-row">
           <label class="field-shell" for="path-input">
             <span class="field-icon">Path</span>
-            <input id="path-input" type="text" placeholder="Enter absolute project path..." />
+            <input id="path-input" type="text" placeholder="Enter local path or GitHub URL..." />
           </label>
           <button id="scan-btn" class="action-btn">Scan Project</button>
           <label class="field-shell" for="search-input">
@@ -920,7 +1048,8 @@
         <div class="metric-card">
           <div class="metric-label">Scan lens</div>
           <div class="metric-value">AST</div>
-          <div class="metric-note">Functions, classes, imports, and call edges are extracted directly from Python source.</div>
+          <div class="metric-note">Functions, classes, imports, and call edges are extracted directly from Python
+            source.</div>
         </div>
         <div class="metric-card">
           <div class="metric-label">Signal</div>
@@ -941,10 +1070,14 @@
           </div>
           <div class="legend">
             <div class="legend-title">Mutation legend</div>
-            <div class="legend-row"><span class="legend-dot" style="background:#00ff88;"></span><span class="legend-name">New</span><span>recent file</span></div>
-            <div class="legend-row"><span class="legend-dot" style="background:#ffcc00;"></span><span class="legend-name">Modified</span><span>last 30 commits</span></div>
-            <div class="legend-row"><span class="legend-dot" style="background:#ff4444;"></span><span class="legend-name">Hotspot</span><span>high churn</span></div>
-            <div class="legend-row"><span class="legend-dot" style="background:#aaaaaa;"></span><span class="legend-name">Stable</span><span>no recent activity</span></div>
+            <div class="legend-row"><span class="legend-dot" style="background:#00ff88;"></span><span
+                class="legend-name">New</span><span>recent file</span></div>
+            <div class="legend-row"><span class="legend-dot" style="background:#ffcc00;"></span><span
+                class="legend-name">Modified</span><span>last 30 commits</span></div>
+            <div class="legend-row"><span class="legend-dot" style="background:#ff4444;"></span><span
+                class="legend-name">Hotspot</span><span>high churn</span></div>
+            <div class="legend-row"><span class="legend-dot" style="background:#aaaaaa;"></span><span
+                class="legend-name">Stable</span><span>no recent activity</span></div>
           </div>
         </div>
 
@@ -956,7 +1089,9 @@
           <div id="graph-empty-state" class="empty-state">
             <h2 class="empty-title">Scan a codebase to light up the map.</h2>
             <p class="empty-copy">
-              Paste a local repository path, run a scan, then click nodes for details, right-click for blast radius, and double-click to open source.
+              Paste a local repository path or GitHub URL, run a scan, then click nodes for details, right-click for
+              blast radius, and
+              double-click to open source.
             </p>
             <div class="empty-points">
               <div class="empty-point">Interactive force graph</div>
@@ -1024,6 +1159,20 @@
             <div class="panel-label">Blast radius</div>
             <div id="blast-info">Right-click a node to simulate impact.</div>
           </div>
+
+          <div class="panel-card">
+            <div class="panel-label">Node chat</div>
+            <div class="chat-shell">
+              <div id="chat-messages" class="chat-messages">
+                <div class="chat-empty">Ask about the selected node or overall project architecture.</div>
+              </div>
+              <div class="chat-composer">
+                <textarea id="chat-input" placeholder="Ask a question about this node or the project..."></textarea>
+                <button id="chat-send-btn" class="panel-action">Ask AI</button>
+              </div>
+            </div>
+            <div id="chat-hint" class="chat-hint">Uses provider: groq (configurable later).</div>
+          </div>
         </div>
 
         <div class="detail-placeholder">
@@ -1048,4 +1197,5 @@
   <script src="/panel.js"></script>
   <script src="/graph.js"></script>
 </body>
+
 </html>
