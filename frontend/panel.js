@@ -2,6 +2,139 @@ function getNodeById(nodeId, graphData) {
   return graphData?.nodes?.find((node) => node.id === nodeId) || null;
 }
 
+let activeChatNodeId = null;
+let chatHistory = [];
+let isChatRequestInFlight = false;
+const DEFAULT_CHAT_PROVIDER = "groq";
+
+function getChatElements() {
+  return {
+    messages: document.getElementById("chat-messages"),
+    input: document.getElementById("chat-input"),
+    sendButton: document.getElementById("chat-send-btn"),
+    hint: document.getElementById("chat-hint"),
+  };
+}
+
+function renderChatMessages() {
+  const { messages, hint } = getChatElements();
+  if (!messages) {
+    return;
+  }
+
+  messages.innerHTML = "";
+  if (chatHistory.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "chat-empty";
+    empty.textContent = "Ask about the selected node or overall project architecture.";
+    messages.appendChild(empty);
+  } else {
+    chatHistory.forEach((item) => {
+      const message = document.createElement("div");
+      message.className = `chat-message ${item.role === "assistant" ? "assistant" : "user"}`;
+      message.textContent = item.content;
+      messages.appendChild(message);
+    });
+  }
+
+  if (hint) {
+    hint.textContent = `Uses provider: ${DEFAULT_CHAT_PROVIDER} (configurable later).`;
+  }
+
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function resetChatForNode(nodeId, nodeName) {
+  if (!nodeId || activeChatNodeId === nodeId) {
+    return;
+  }
+  activeChatNodeId = nodeId;
+  chatHistory = [
+    {
+      role: "assistant",
+      content: `Ready to help with ${nodeName || "this node"}. Ask about logic, dependencies, risks, or impact.`,
+    },
+  ];
+  renderChatMessages();
+}
+
+function setChatPending(isPending) {
+  isChatRequestInFlight = isPending;
+  const { input, sendButton } = getChatElements();
+  if (input) {
+    input.disabled = isPending;
+  }
+  if (sendButton) {
+    sendButton.disabled = isPending;
+    sendButton.textContent = isPending ? "Thinking..." : "Ask AI";
+  }
+}
+
+async function submitChatMessage() {
+  const { input } = getChatElements();
+  if (!input || isChatRequestInFlight) {
+    return;
+  }
+
+  const message = input.value.trim();
+  if (!message) {
+    return;
+  }
+
+  chatHistory.push({ role: "user", content: message });
+  input.value = "";
+  renderChatMessages();
+  setChatPending(true);
+
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message,
+        node_id: activeChatNodeId,
+        provider: DEFAULT_CHAT_PROVIDER,
+        history: chatHistory,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Chat request failed");
+    }
+    chatHistory.push({
+      role: "assistant",
+      content: data.answer || "No response generated.",
+    });
+  } catch (error) {
+    chatHistory.push({
+      role: "assistant",
+      content: `Could not answer right now: ${error.message}`,
+    });
+  } finally {
+    setChatPending(false);
+    renderChatMessages();
+  }
+}
+
+function initializeChatUi() {
+  const { input, sendButton } = getChatElements();
+  if (!input || !sendButton) {
+    return;
+  }
+
+  sendButton.addEventListener("click", submitChatMessage);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submitChatMessage();
+    }
+  });
+
+  renderChatMessages();
+}
+
 function makeLinkedNodeItem(node, graphData) {
   const button = document.createElement("button");
   button.className = "linked-item";
@@ -17,12 +150,20 @@ function makeLinkedNodeItem(node, graphData) {
 
 function getMutationBadgeHTML(status) {
   const normalized = (status || "stable").toLowerCase();
-  const palette = {
-    new: { background: "#003f2d", color: "#00ff88", label: "NEW" },
-    modified: { background: "#4f3f00", color: "#ffcc00", label: "MODIFIED" },
-    hotspot: { background: "#4a1515", color: "#ff5555", label: "HOTSPOT" },
-    stable: { background: "#333333", color: "#dddddd", label: "STABLE" },
-  };
+  const isLightTheme = document.body?.dataset?.theme === "light";
+  const palette = isLightTheme
+    ? {
+      new: { background: "#dff8ed", color: "#136f4e", label: "NEW" },
+      modified: { background: "#fff3cf", color: "#7a5500", label: "MODIFIED" },
+      hotspot: { background: "#fde2e4", color: "#8e2834", label: "HOTSPOT" },
+      stable: { background: "#e8eef2", color: "#355165", label: "STABLE" },
+    }
+    : {
+      new: { background: "#003f2d", color: "#00ff88", label: "NEW" },
+      modified: { background: "#4f3f00", color: "#ffcc00", label: "MODIFIED" },
+      hotspot: { background: "#4a1515", color: "#ff5555", label: "HOTSPOT" },
+      stable: { background: "#333333", color: "#dddddd", label: "STABLE" },
+    };
   const badge = palette[normalized] || palette.stable;
   return `<span class="mutation-badge" style="background:${badge.background};color:${badge.color};">${badge.label}</span>`;
 }
@@ -46,6 +187,7 @@ async function loadNodeDetail(node, graphData) {
     document.getElementById("mutation-badge").innerHTML = getMutationBadgeHTML(data.mutation_status);
     document.getElementById("churn-info").textContent =
       `Churn: ${data.churn_count || 0} commits | Last: ${data.last_modified_commit || "N/A"}`;
+    resetChatForNode(node.id, data.name || node.name);
 
     const callersContainer = document.getElementById("callers-list");
     const calleesContainer = document.getElementById("callees-list");
@@ -129,6 +271,7 @@ function hidePanel() {
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("panel-close-btn")?.addEventListener("click", hidePanel);
+  initializeChatUi();
 });
 
 window.loadNodeDetail = loadNodeDetail;
