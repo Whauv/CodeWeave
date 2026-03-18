@@ -465,6 +465,45 @@
       z-index: 1;
     }
 
+    .node-tooltip {
+      position: absolute;
+      z-index: 9;
+      max-width: 280px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(12, 16, 18, 0.94);
+      color: var(--text);
+      box-shadow: var(--shadow);
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.14s ease, transform 0.14s ease;
+    }
+
+    body[data-theme="light"] .node-tooltip {
+      background: rgba(252, 254, 255, 0.96);
+    }
+
+    .node-tooltip.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .node-tooltip-title {
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--accent-soft);
+      margin-bottom: 6px;
+    }
+
+    .node-tooltip-body {
+      line-height: 1.5;
+      color: var(--text);
+      font-size: 0.92rem;
+    }
+
     .empty-state {
       position: absolute;
       inset: 50% auto auto 50%;
@@ -910,6 +949,10 @@
         </div>
 
         <div id="graph-container">
+          <div id="node-tooltip" class="node-tooltip">
+            <div id="node-tooltip-title" class="node-tooltip-title"></div>
+            <div id="node-tooltip-body" class="node-tooltip-body"></div>
+          </div>
           <div id="graph-empty-state" class="empty-state">
             <h2 class="empty-title">Scan a codebase to light up the map.</h2>
             <p class="empty-copy">
