@@ -590,11 +590,80 @@
       pointer-events: none;
     }
 
+    .graph-subbar {
+      position: absolute;
+      top: 72px;
+      left: 16px;
+      right: auto;
+      max-width: calc(100% - 300px);
+      z-index: 6;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 12px;
+      pointer-events: none;
+    }
+
     .toolbar-group {
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
       pointer-events: auto;
+    }
+
+    .breadcrumb-bar,
+    .graph-progress-shell {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      pointer-events: auto;
+      min-width: 0;
+    }
+
+    .breadcrumb-bar {
+      flex: 1 1 auto;
+      overflow: hidden;
+    }
+
+    .breadcrumb-bar:empty {
+      display: none;
+    }
+
+    .graph-progress-shell {
+      flex: 0 0 auto;
+    }
+
+    .breadcrumb-chip {
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .breadcrumb-sep {
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .graph-progress-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .graph-progress-pill strong {
+      color: var(--text);
+      margin-left: 6px;
     }
 
     .legend {
@@ -1258,6 +1327,14 @@
         flex-direction: column;
       }
 
+      .graph-subbar {
+        position: static;
+        padding: 12px 14px 0;
+        max-width: none;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
       .empty-state {
         position: static;
         transform: none;
@@ -1318,6 +1395,7 @@
             <div class="scan-history-empty">Scanned project paths and GitHub repos will appear here.</div>
           </div>
         </div>
+
       </div>
 
       <div class="summary-block">
@@ -1341,8 +1419,14 @@
           <div class="toolbar-group">
             <button id="tree-layout-btn" class="ghost-btn active">Tree Layout</button>
             <button id="force-layout-btn" class="ghost-btn">Force Layout</button>
+            <button id="cluster-toggle-btn" class="ghost-btn active">Cluster View</button>
             <button id="theme-toggle-btn" class="ghost-btn">Light Theme</button>
+            <button id="graph-load-more-btn" class="ghost-btn">Load More</button>
+            <button id="graph-show-all-btn" class="ghost-btn">Show All</button>
             <button id="clear-blast-btn" class="ghost-btn">Clear Blast View</button>
+            <button id="export-svg-btn" class="ghost-btn">Export SVG</button>
+            <button id="export-png-btn" class="ghost-btn">Export PNG</button>
+            <button id="export-json-btn" class="ghost-btn">Export JSON</button>
           </div>
           <div class="legend">
             <div class="legend-title">Mutation legend</div>
@@ -1354,7 +1438,12 @@
                 class="legend-name">Hotspot</span><span>high churn</span></div>
             <div class="legend-row"><span class="legend-dot" style="background:#aaaaaa;"></span><span
                 class="legend-name">Stable</span><span>no recent activity</span></div>
+            <div id="graph-progress-pill" class="graph-progress-pill">Visible<strong>0 / 0</strong></div>
           </div>
+        </div>
+
+        <div class="graph-subbar">
+          <div id="graph-breadcrumbs" class="breadcrumb-bar"></div>
         </div>
 
         <div id="graph-container">
