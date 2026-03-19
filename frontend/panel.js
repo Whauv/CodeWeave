@@ -32,7 +32,20 @@ function loadStoredChatSessions() {
   try {
     const raw = window.localStorage.getItem(CHAT_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    chatSessions = Array.isArray(parsed) ? parsed : [];
+    chatSessions = Array.isArray(parsed)
+      ? parsed.map((session) => {
+          const normalizedNodeName = formatReadableLabel(session.nodeName, "Project");
+          const normalizedTitle =
+            !session.title || / thread$/i.test(session.title)
+              ? buildSessionTitle(normalizedNodeName)
+              : session.title;
+          return {
+            ...session,
+            nodeName: normalizedNodeName,
+            title: normalizedTitle,
+          };
+        })
+      : [];
   } catch (error) {
     console.error(error);
     chatSessions = [];
@@ -43,24 +56,47 @@ function persistChatSessions() {
   window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatSessions));
 }
 
+function formatReadableLabel(value, fallback = "Project") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return fallback;
+  }
+
+  const withoutModulePrefix = raw.includes(".") ? raw.split(".").at(-1) : raw;
+  const spaced = withoutModulePrefix
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!spaced) {
+    return fallback;
+  }
+
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 function buildSessionTitle(nodeName, firstUserMessage = "") {
   if (firstUserMessage) {
     return firstUserMessage.length > 28 ? `${firstUserMessage.slice(0, 28)}...` : firstUserMessage;
   }
-  return nodeName ? `${nodeName} thread` : "Project thread";
+  return nodeName ? formatReadableLabel(nodeName, "Project") : "Project chat";
 }
 
 function createChatSession(nodeId, nodeName) {
+  const scanTarget = window.__CODEWEAVE_SCAN_TARGET__ || null;
+  const formattedNodeName = formatReadableLabel(nodeName, "Project");
   const session = {
     id: makeSessionId(),
     nodeId: nodeId || null,
-    nodeName: nodeName || "Project",
-    title: buildSessionTitle(nodeName || "Project"),
+    nodeName: formattedNodeName,
+    scanTarget,
+    title: buildSessionTitle(formattedNodeName),
     updatedAt: Date.now(),
     messages: [
       {
         role: "assistant",
-        content: `Ready to help with ${nodeName || "this project"}. Ask about logic, dependencies, risks, or impact.`,
+        content: `Ready to help with ${formattedNodeName === "Project" ? "this project" : formattedNodeName}. Ask about logic, dependencies, risks, or impact.`,
       },
     ],
   };
@@ -70,12 +106,40 @@ function createChatSession(nodeId, nodeName) {
   return session;
 }
 
-function activateChatSession(sessionId) {
+async function activateChatSession(sessionId) {
   activeChatSessionId = sessionId;
   const session = getActiveChatSession();
   if (session) {
     activeChatNodeId = session.nodeId || null;
+    if (session.scanTarget && typeof window.loadCachedScanTarget === "function") {
+      await window.loadCachedScanTarget(session.scanTarget, { silent: true });
+    }
+    const graphData = window.__CODEMAPPER_GRAPH__;
+    if (session.nodeId && graphData) {
+      const node = getNodeById(session.nodeId, graphData);
+      if (node) {
+        if (window.highlightNode) {
+          window.highlightNode(node.id);
+        }
+        document.getElementById("detail-panel")?.classList.remove("hidden");
+        document.getElementById("detail-shell")?.classList.remove("hidden");
+        loadNodeDetail(node, graphData);
+      }
+    }
   }
+  renderChatSessions();
+  renderChatMessages();
+}
+
+function deleteChatSession(sessionId) {
+  const deletedWasActive = activeChatSessionId === sessionId;
+  chatSessions = chatSessions.filter((session) => session.id !== sessionId);
+  if (deletedWasActive) {
+    const fallback = chatSessions[0] || null;
+    activeChatSessionId = fallback ? fallback.id : null;
+    activeChatNodeId = fallback ? (fallback.nodeId || null) : null;
+  }
+  persistChatSessions();
   renderChatSessions();
   renderChatMessages();
 }
@@ -85,6 +149,14 @@ function ensureChatSession(nodeId, nodeName) {
   if (matchingSession) {
     activeChatSessionId = matchingSession.id;
     activeChatNodeId = matchingSession.nodeId;
+    if (nodeName) {
+      matchingSession.nodeName = formatReadableLabel(nodeName, matchingSession.nodeName || "Project");
+      if (!matchingSession.title || matchingSession.title.endsWith("thread")) {
+        matchingSession.title = buildSessionTitle(matchingSession.nodeName);
+      }
+    }
+    matchingSession.scanTarget = matchingSession.scanTarget || window.__CODEWEAVE_SCAN_TARGET__ || null;
+    persistChatSessions();
     return matchingSession;
   }
   return createChatSession(nodeId, nodeName);
@@ -112,11 +184,19 @@ function renderChatSessions() {
       const button = document.createElement("button");
       button.className = `chat-session-chip ${session.id === activeChatSessionId ? "active" : ""}`;
       button.innerHTML = `
-        <span class="chat-session-label">${session.title || "Untitled thread"}</span>
-        <span class="chat-session-meta">${session.nodeName || "Project"}</span>
+        <span class="chat-session-chip-inner">
+          <span class="chat-session-label">${session.title || "Untitled thread"}</span>
+          <span class="chat-session-meta">${session.nodeName || "Project"}</span>
+        </span>
+        <span class="chip-delete-btn" title="Delete conversation">x</span>
       `;
-      button.addEventListener("click", () => {
-        activateChatSession(session.id);
+      button.addEventListener("click", async (event) => {
+        if (event.target instanceof HTMLElement && event.target.classList.contains("chip-delete-btn")) {
+          event.stopPropagation();
+          deleteChatSession(session.id);
+          return;
+        }
+        await activateChatSession(session.id);
       });
       sessionBar.appendChild(button);
     });
@@ -191,6 +271,7 @@ async function submitChatMessage() {
   if (!activeSession) {
     activeSession = createChatSession(activeChatNodeId, activeChatNodeId ? "Selected node" : "Project");
   }
+  activeSession.scanTarget = window.__CODEWEAVE_SCAN_TARGET__ || activeSession.scanTarget || null;
   if (!activeSession.title || activeSession.title.endsWith("thread")) {
     activeSession.title = buildSessionTitle(activeSession.nodeName, message);
   }

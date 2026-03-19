@@ -325,6 +325,120 @@
       align-items: center;
     }
 
+    .view-toggle-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .scan-history-shell {
+      display: grid;
+      gap: 8px;
+    }
+
+    .scan-history-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .scan-history-title {
+      font-size: 0.78rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .scan-history-list {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+
+    .scan-history-empty {
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.4;
+      padding: 4px 0;
+    }
+
+    .scan-history-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      max-width: 260px;
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      cursor: pointer;
+      flex: 0 0 auto;
+      white-space: nowrap;
+      transition: transform 0.18s ease, border-color 0.18s ease;
+    }
+
+    .scan-history-chip-inner {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .scan-history-chip:hover {
+      transform: translateY(-1px);
+      border-color: var(--border-strong);
+    }
+
+    .scan-history-chip.active {
+      border-color: rgba(255, 140, 66, 0.35);
+      background: rgba(255, 140, 66, 0.12);
+      color: var(--accent-soft);
+    }
+
+    body[data-theme="light"] .scan-history-chip.active {
+      border-color: rgba(21, 112, 239, 0.28);
+      background: rgba(21, 112, 239, 0.12);
+      color: var(--accent);
+    }
+
+    .scan-history-kind {
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .scan-history-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 0.84rem;
+    }
+
+    .chip-delete-btn {
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      flex: 0 0 auto;
+      line-height: 1;
+    }
+
+    .chip-delete-btn:hover {
+      border-color: var(--border-strong);
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
     .status-pill,
     .mini-pill {
       display: inline-flex;
@@ -383,6 +497,57 @@
       gap: 14px;
       border-radius: 30px;
       padding: 14px;
+    }
+
+    .main-frame[data-view="graph"] {
+      grid-template-columns: 1fr 0;
+    }
+
+    .main-frame[data-view="panel"] {
+      grid-template-columns: 0 minmax(420px, 1fr);
+    }
+
+    .main-frame[data-view="graph"] .detail-shell,
+    .main-frame[data-view="panel"] .graph-shell {
+      opacity: 0;
+      pointer-events: none;
+      min-width: 0;
+      border-width: 0;
+    }
+
+    .pane-divider {
+      position: relative;
+      width: 14px;
+      margin: 0 -4px;
+      cursor: col-resize;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .pane-divider::before {
+      content: "";
+      width: 4px;
+      height: 92px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      transition: background 0.18s ease, transform 0.18s ease;
+    }
+
+    .pane-divider:hover::before,
+    .pane-divider.dragging::before {
+      background: rgba(255, 140, 66, 0.55);
+      transform: scaleX(1.1);
+    }
+
+    body[data-theme="light"] .pane-divider::before {
+      background: rgba(23, 45, 62, 0.16);
+    }
+
+    body[data-theme="light"] .pane-divider:hover::before,
+    body[data-theme="light"] .pane-divider.dragging::before {
+      background: rgba(21, 112, 239, 0.42);
     }
 
     .graph-shell,
@@ -806,11 +971,16 @@
       background: rgba(255, 255, 255, 0.03);
     }
 
+    .chat-panel-label,
     .chat-toolbar-title {
-      font-size: 0.82rem;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
+      text-transform: none;
+      letter-spacing: 0.02em;
+    }
+
+    .chat-toolbar-title {
+      font-size: 0.88rem;
       color: var(--muted);
+      font-weight: 600;
     }
 
     .chat-session-bar {
@@ -831,17 +1001,25 @@
     .chat-session-chip {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      max-width: 220px;
-      min-height: 34px;
-      padding: 0 12px;
-      border-radius: 999px;
+      gap: 8px;
+      max-width: 260px;
+      min-height: 44px;
+      padding: 8px 12px;
+      border-radius: 16px;
       border: 1px solid var(--border);
       background: rgba(255, 255, 255, 0.04);
       color: var(--text);
       cursor: pointer;
-      white-space: nowrap;
       flex: 0 0 auto;
+    }
+
+    .chat-session-chip-inner {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 3px;
+      min-width: 0;
+      flex: 1;
     }
 
     .chat-session-chip.active {
@@ -859,14 +1037,19 @@
     .chat-session-label {
       overflow: hidden;
       text-overflow: ellipsis;
+      white-space: nowrap;
       font-size: 0.84rem;
+      font-weight: 600;
+      max-width: 100%;
     }
 
     .chat-session-meta {
       color: var(--muted);
-      font-size: 0.72rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
+      font-size: 0.74rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
     }
 
     .chat-messages {
@@ -1036,6 +1219,10 @@
         grid-template-columns: 1fr;
       }
 
+      .pane-divider {
+        display: none;
+      }
+
       .graph-shell {
         min-height: 58vh;
       }
@@ -1115,6 +1302,22 @@
           <div class="mini-pill">Selection <strong id="metric-selected">None</strong></div>
           <div class="mini-pill">Mode <strong id="metric-mode">Explore</strong></div>
         </div>
+
+        <div class="view-toggle-row">
+          <button id="view-split-btn" class="ghost-btn active">Split View</button>
+          <button id="view-graph-btn" class="ghost-btn">Graph Focus</button>
+          <button id="view-panel-btn" class="ghost-btn">Prompt Focus</button>
+        </div>
+
+        <div class="scan-history-shell">
+          <div class="scan-history-header">
+            <div class="scan-history-title">Recent scans</div>
+            <button id="scan-history-clear-btn" class="ghost-btn">Clear History</button>
+          </div>
+          <div id="scan-history-list" class="scan-history-list">
+            <div class="scan-history-empty">Scanned project paths and GitHub repos will appear here.</div>
+          </div>
+        </div>
       </div>
 
       <div class="summary-block">
@@ -1191,6 +1394,8 @@
         </div>
       </div>
 
+      <div id="pane-divider" class="pane-divider" aria-hidden="true"></div>
+
       <aside id="detail-shell" class="detail-shell hidden">
         <div id="detail-panel" class="hidden">
           <div class="panel-card">
@@ -1207,6 +1412,27 @@
           <div class="panel-card">
             <div class="panel-label">Summary</div>
             <div id="node-summary">Node details will appear here.</div>
+          </div>
+
+          <div class="panel-card">
+            <div class="panel-label chat-panel-label">Chat</div>
+            <div class="chat-shell">
+              <div class="chat-toolbar">
+                <div class="chat-toolbar-title">Saved chats</div>
+                <button id="chat-new-btn" class="panel-action">New Chat</button>
+              </div>
+              <div id="chat-session-bar" class="chat-session-bar">
+                <div class="chat-session-empty">Your saved chat threads will appear here.</div>
+              </div>
+              <div id="chat-messages" class="chat-messages">
+                <div class="chat-empty">Ask about the selected node or overall project architecture.</div>
+              </div>
+              <div class="chat-composer">
+                <textarea id="chat-input" placeholder="Ask a question about this node or the project..."></textarea>
+                <button id="chat-send-btn" class="panel-action">Ask AI</button>
+              </div>
+            </div>
+            <div id="chat-hint" class="chat-hint">Uses provider: groq (configurable later).</div>
           </div>
 
           <div class="panel-card">
@@ -1231,27 +1457,6 @@
           <div class="panel-card">
             <div class="panel-label">Blast radius</div>
             <div id="blast-info">Right-click a node to simulate impact.</div>
-          </div>
-
-          <div class="panel-card">
-            <div class="panel-label">Node chat</div>
-            <div class="chat-shell">
-              <div class="chat-toolbar">
-                <div class="chat-toolbar-title">Saved conversations</div>
-                <button id="chat-new-btn" class="panel-action">New Chat</button>
-              </div>
-              <div id="chat-session-bar" class="chat-session-bar">
-                <div class="chat-session-empty">Your saved chat threads will appear here.</div>
-              </div>
-              <div id="chat-messages" class="chat-messages">
-                <div class="chat-empty">Ask about the selected node or overall project architecture.</div>
-              </div>
-              <div class="chat-composer">
-                <textarea id="chat-input" placeholder="Ask a question about this node or the project..."></textarea>
-                <button id="chat-send-btn" class="panel-action">Ask AI</button>
-              </div>
-            </div>
-            <div id="chat-hint" class="chat-hint">Uses provider: groq (configurable later).</div>
           </div>
         </div>
 
