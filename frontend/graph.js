@@ -31,6 +31,9 @@ let graphCacheDbPromise = null;
 let viewMode = "split";
 let splitRatio = 0.68;
 let isDraggingDivider = false;
+let zoomFramePending = false;
+let pendingZoomTransform = null;
+let dividerRenderFrame = null;
 
 function getSelectedNode() {
   return graphData?.nodes?.find((node) => node.id === selectedNodeId) || null;
@@ -93,10 +96,7 @@ function setSplitRatioFromPointer(clientX) {
   splitRatio = Math.min(0.82, Math.max(0.35, nextRatio));
   persistSplitRatio();
   applySplitRatio();
-  if (graphData) {
-    renderGraph(graphData);
-    restoreVisualState();
-  }
+  scheduleGraphResize();
 }
 
 function setDividerDragging(isDragging) {
@@ -534,9 +534,33 @@ function buildSvgShell() {
 
   svg.call(
     d3.zoom().scaleExtent([0.2, 3]).on("zoom", (event) => {
-      zoomLayer.attr("transform", event.transform);
+      pendingZoomTransform = event.transform;
+      if (zoomFramePending) {
+        return;
+      }
+      zoomFramePending = true;
+      window.requestAnimationFrame(() => {
+        if (zoomLayer && pendingZoomTransform) {
+          zoomLayer.attr("transform", pendingZoomTransform);
+        }
+        zoomFramePending = false;
+      });
     }),
   );
+}
+
+function scheduleGraphResize() {
+  if (!graphData) {
+    return;
+  }
+  if (dividerRenderFrame) {
+    window.cancelAnimationFrame(dividerRenderFrame);
+  }
+  dividerRenderFrame = window.requestAnimationFrame(() => {
+    renderGraph(graphData);
+    restoreVisualState();
+    dividerRenderFrame = null;
+  });
 }
 
 function buildGraphCollections(data) {
@@ -700,13 +724,14 @@ function renderForceGraph(data, width, height) {
     .force("link", d3.forceLink(links).id((node) => node.id).distance(120))
     .force("charge", d3.forceManyBody().strength(-300))
     .force("center", d3.forceCenter(width / 2, height / 2))
-    .force("collide", d3.forceCollide().radius((node) => getNodeRadius(node) + 10));
+    .force("collide", d3.forceCollide().radius((node) => getNodeRadius(node) + 10))
+    .alphaDecay(0.08)
+    .velocityDecay(0.45);
 
   linkSelection = linkLayer
-    .selectAll("path")
+    .selectAll("line")
     .data(links, (link) => `${link.source.id}-${link.target.id}`)
-    .join("path")
-    .attr("fill", "none")
+    .join("line")
     .attr("stroke", palette.linkForce)
     .attr("stroke-width", 1.2)
     .attr("marker-end", "url(#arrowhead)");
@@ -761,7 +786,11 @@ function renderForceGraph(data, width, height) {
     .attr("pointer-events", "none");
 
   simulation.on("tick", () => {
-    linkSelection.attr("d", (link) => treePath(link));
+    linkSelection
+      .attr("x1", (link) => link.source.x)
+      .attr("y1", (link) => link.source.y)
+      .attr("x2", (link) => link.target.x)
+      .attr("y2", (link) => link.target.y);
     nodeSelection
       .attr("cx", (node) => node.x)
       .attr("cy", (node) => node.y);
@@ -1138,6 +1167,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (isDraggingDivider) {
       setDividerDragging(false);
     }
+  });
+  window.addEventListener("resize", () => {
+    scheduleGraphResize();
   });
   syncActionButtons();
 });
