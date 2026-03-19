@@ -20,6 +20,17 @@ let nodeData = [];
 let layoutMode = "tree";
 let blastRequestInFlight = false;
 let themeMode = "dark";
+let currentScanTarget = "";
+let scanHistory = [];
+const SCAN_HISTORY_STORAGE_KEY = "codeweave-scan-history-v1";
+const GRAPH_CACHE_DB_NAME = "codeweave-graph-cache";
+const GRAPH_CACHE_STORE = "snapshots";
+const VIEW_MODE_STORAGE_KEY = "codeweave-view-mode-v1";
+const SPLIT_RATIO_STORAGE_KEY = "codeweave-split-ratio-v1";
+let graphCacheDbPromise = null;
+let viewMode = "split";
+let splitRatio = 0.68;
+let isDraggingDivider = false;
 
 function getSelectedNode() {
   return graphData?.nodes?.find((node) => node.id === selectedNodeId) || null;
@@ -31,6 +42,273 @@ function getTooltipElements() {
     title: document.getElementById("node-tooltip-title"),
     body: document.getElementById("node-tooltip-body"),
   };
+}
+
+function setViewMode(nextMode, persist = true) {
+  viewMode = nextMode;
+  const frame = document.querySelector(".main-frame");
+  if (frame) {
+    frame.dataset.view = nextMode;
+    if (nextMode === "split") {
+      frame.style.gridTemplateColumns = `minmax(0, ${splitRatio}fr) 14px minmax(320px, ${Math.max(0.35, 1 - splitRatio)}fr)`;
+    } else if (nextMode === "graph") {
+      frame.style.gridTemplateColumns = "1fr 0 0";
+    } else if (nextMode === "panel") {
+      frame.style.gridTemplateColumns = "0 0 minmax(420px, 1fr)";
+    }
+  }
+  document.getElementById("view-split-btn")?.classList.toggle("active", nextMode === "split");
+  document.getElementById("view-graph-btn")?.classList.toggle("active", nextMode === "graph");
+  document.getElementById("view-panel-btn")?.classList.toggle("active", nextMode === "panel");
+  if (persist) {
+    window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, nextMode);
+  }
+}
+
+function loadSplitRatio() {
+  const raw = Number(window.localStorage.getItem(SPLIT_RATIO_STORAGE_KEY));
+  if (!Number.isNaN(raw) && raw >= 0.35 && raw <= 0.82) {
+    splitRatio = raw;
+  }
+}
+
+function persistSplitRatio() {
+  window.localStorage.setItem(SPLIT_RATIO_STORAGE_KEY, String(splitRatio));
+}
+
+function applySplitRatio() {
+  if (viewMode === "split") {
+    setViewMode("split", false);
+  }
+}
+
+function setSplitRatioFromPointer(clientX) {
+  const frame = document.querySelector(".main-frame");
+  if (!frame) {
+    return;
+  }
+  const bounds = frame.getBoundingClientRect();
+  const relativeX = clientX - bounds.left;
+  const nextRatio = relativeX / bounds.width;
+  splitRatio = Math.min(0.82, Math.max(0.35, nextRatio));
+  persistSplitRatio();
+  applySplitRatio();
+  if (graphData) {
+    renderGraph(graphData);
+    restoreVisualState();
+  }
+}
+
+function setDividerDragging(isDragging) {
+  isDraggingDivider = isDragging;
+  document.getElementById("pane-divider")?.classList.toggle("dragging", isDragging);
+  document.body.style.userSelect = isDragging ? "none" : "";
+}
+
+function openGraphCacheDb() {
+  if (graphCacheDbPromise) {
+    return graphCacheDbPromise;
+  }
+
+  graphCacheDbPromise = new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(GRAPH_CACHE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(GRAPH_CACHE_STORE)) {
+        db.createObjectStore(GRAPH_CACHE_STORE, { keyPath: "target" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+
+  return graphCacheDbPromise;
+}
+
+async function saveGraphSnapshot(target, data) {
+  if (!target || !data) {
+    return;
+  }
+  try {
+    const db = await openGraphCacheDb();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(GRAPH_CACHE_STORE, "readwrite");
+      const store = transaction.objectStore(GRAPH_CACHE_STORE);
+      store.put({
+        target,
+        data,
+        updatedAt: Date.now(),
+      });
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function getGraphSnapshot(target) {
+  if (!target) {
+    return null;
+  }
+  try {
+    const db = await openGraphCacheDb();
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(GRAPH_CACHE_STORE, "readonly");
+      const store = transaction.objectStore(GRAPH_CACHE_STORE);
+      const request = store.get(target);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (error) {
+    console.error(error);
+    return null;
+  }
+}
+
+function isGithubUrl(value) {
+  return /^https?:\/\/(www\.)?github\.com\//i.test(value || "");
+}
+
+function buildScanHistoryLabel(target) {
+  const normalized = String(target || "").trim();
+  if (!normalized) {
+    return "Unknown target";
+  }
+  if (isGithubUrl(normalized)) {
+    try {
+      const url = new URL(normalized);
+      const path = url.pathname.replace(/^\//, "").replace(/\.git$/, "");
+      return path || normalized;
+    } catch (_) {
+      return normalized;
+    }
+  }
+  const parts = normalized.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || normalized;
+}
+
+function loadScanHistory() {
+  try {
+    const raw = window.localStorage.getItem(SCAN_HISTORY_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    scanHistory = Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error(error);
+    scanHistory = [];
+  }
+}
+
+function persistScanHistory() {
+  window.localStorage.setItem(SCAN_HISTORY_STORAGE_KEY, JSON.stringify(scanHistory));
+}
+
+function renderScanHistory() {
+  const container = document.getElementById("scan-history-list");
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = "";
+  if (scanHistory.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "scan-history-empty";
+    empty.textContent = "Scanned project paths and GitHub repos will appear here.";
+    container.appendChild(empty);
+    return;
+  }
+
+  scanHistory.forEach((entry) => {
+    const button = document.createElement("button");
+    button.className = `scan-history-chip ${entry.target === currentScanTarget ? "active" : ""}`;
+    button.innerHTML = `
+      <span class="scan-history-chip-inner">
+        <span class="scan-history-kind">${entry.kind}</span>
+        <span class="scan-history-label">${entry.label}</span>
+      </span>
+      <span class="chip-delete-btn" title="Remove from recent scans">x</span>
+    `;
+    button.title = entry.target;
+    button.addEventListener("click", async (event) => {
+      if (event.target instanceof HTMLElement && event.target.classList.contains("chip-delete-btn")) {
+        event.stopPropagation();
+        deleteScanHistoryEntry(entry.target);
+        return;
+      }
+      const input = document.getElementById("path-input");
+      if (input) {
+        input.value = entry.target;
+        input.focus();
+      }
+      currentScanTarget = entry.target;
+      renderScanHistory();
+      const loaded = await loadCachedScanTarget(entry.target, { silent: true });
+      setStatus(
+        loaded
+          ? `Loaded cached graph for ${entry.target}`
+          : `Loaded recent target: ${entry.target}`
+      );
+    });
+    container.appendChild(button);
+  });
+}
+
+function addScanHistoryEntry(target) {
+  const normalized = String(target || "").trim();
+  if (!normalized) {
+    return;
+  }
+  currentScanTarget = normalized;
+  const entry = {
+    target: normalized,
+    label: buildScanHistoryLabel(normalized),
+    kind: isGithubUrl(normalized) ? "GitHub" : "Local",
+    updatedAt: Date.now(),
+  };
+  scanHistory = [entry, ...scanHistory.filter((item) => item.target !== normalized)]
+    .sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0))
+    .slice(0, 12);
+  persistScanHistory();
+  renderScanHistory();
+}
+
+function clearScanHistory() {
+  scanHistory = [];
+  currentScanTarget = "";
+  window.localStorage.removeItem(SCAN_HISTORY_STORAGE_KEY);
+  renderScanHistory();
+  setStatus("Cleared recent scan history.");
+}
+
+function deleteScanHistoryEntry(target) {
+  scanHistory = scanHistory.filter((entry) => entry.target !== target);
+  if (currentScanTarget === target) {
+    currentScanTarget = "";
+  }
+  persistScanHistory();
+  renderScanHistory();
+  setStatus(`Removed recent scan: ${target}`);
+}
+
+async function loadCachedScanTarget(target, options = {}) {
+  const normalized = String(target || "").trim();
+  if (!normalized) {
+    return false;
+  }
+
+  const snapshot = await getGraphSnapshot(normalized);
+  if (!snapshot || !snapshot.data) {
+    return false;
+  }
+
+  currentScanTarget = normalized;
+  window.__CODEWEAVE_SCAN_TARGET__ = normalized;
+  updateGraph(snapshot.data);
+  if (!options.silent) {
+    setStatus(`Loaded cached graph for ${normalized}`);
+  }
+  renderScanHistory();
+  return true;
 }
 
 function setMetricValue(id, value) {
@@ -762,7 +1040,11 @@ async function scanProject() {
       throw new Error(data.error || "Scan failed");
     }
 
+    currentScanTarget = path;
+    window.__CODEWEAVE_SCAN_TARGET__ = path;
     updateGraph(data);
+    addScanHistoryEntry(path);
+    await saveGraphSnapshot(path, data);
     setStatus(`Loaded ${data.nodes.length} nodes and ${data.edges.length} edges`);
   } catch (error) {
     console.error(error);
@@ -776,8 +1058,17 @@ async function scanProject() {
 
 document.addEventListener("DOMContentLoaded", () => {
   applyTheme(window.localStorage.getItem("codemapper-theme") || "dark", false);
+  window.__CODEWEAVE_SCAN_TARGET__ = currentScanTarget;
+  loadSplitRatio();
+  setViewMode(window.localStorage.getItem(VIEW_MODE_STORAGE_KEY) || "split", false);
+  loadScanHistory();
+  renderScanHistory();
   showEmptyState();
   document.getElementById("scan-btn").addEventListener("click", scanProject);
+  document.getElementById("view-split-btn").addEventListener("click", () => setViewMode("split"));
+  document.getElementById("view-graph-btn").addEventListener("click", () => setViewMode("graph"));
+  document.getElementById("view-panel-btn").addEventListener("click", () => setViewMode("panel"));
+  document.getElementById("scan-history-clear-btn").addEventListener("click", clearScanHistory);
   document.getElementById("tree-layout-btn").addEventListener("click", () => setLayoutMode("tree"));
   document.getElementById("force-layout-btn").addEventListener("click", () => setLayoutMode("force"));
   document.getElementById("theme-toggle-btn").addEventListener("click", () => {
@@ -794,6 +1085,16 @@ document.addEventListener("DOMContentLoaded", () => {
     searchNodes(event.target.value);
   });
   document.getElementById("clear-blast-btn").addEventListener("click", clearBlastRadius);
+  document.getElementById("pane-divider").addEventListener("mousedown", (event) => {
+    if (window.innerWidth <= 980) {
+      return;
+    }
+    if (viewMode !== "split") {
+      setViewMode("split");
+    }
+    setDividerDragging(true);
+    event.preventDefault();
+  });
   document.getElementById("simulate-blast-btn").addEventListener("click", () => {
     const node = getSelectedNode();
     if (node) {
@@ -816,12 +1117,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.addEventListener("resize", () => {
     hideNodeTooltip();
+    if (window.innerWidth > 980 && viewMode === "split") {
+      applySplitRatio();
+    }
     if (graphData) {
       renderGraph(graphData);
       restoreVisualState();
     }
     if (monacoEditor) {
       monacoEditor.layout();
+    }
+  });
+  window.addEventListener("mousemove", (event) => {
+    if (!isDraggingDivider || window.innerWidth <= 980) {
+      return;
+    }
+    setSplitRatioFromPointer(event.clientX);
+  });
+  window.addEventListener("mouseup", () => {
+    if (isDraggingDivider) {
+      setDividerDragging(false);
     }
   });
   syncActionButtons();
@@ -834,3 +1149,4 @@ window.triggerBlastRadius = triggerBlastRadius;
 window.clearBlastRadius = clearBlastRadius;
 window.searchNodes = searchNodes;
 window.openMonacoModal = openMonacoModal;
+window.loadCachedScanTarget = loadCachedScanTarget;
