@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 .env
 summaries_cache.json
+server_stdout.log
+server_stderr.log
