@@ -247,7 +247,7 @@
 
     .control-row {
       display: grid;
-      grid-template-columns: minmax(0, 1.3fr) 140px minmax(220px, 0.8fr);
+      grid-template-columns: minmax(0, 1.1fr) 170px 140px minmax(220px, 0.8fr);
       gap: 12px;
     }
 
@@ -262,7 +262,8 @@
       min-height: 52px;
     }
 
-    .field-shell input {
+    .field-shell input,
+    .field-shell select {
       width: 100%;
       border: 0;
       outline: 0;
@@ -270,6 +271,11 @@
       color: var(--text);
       font-size: 0.98rem;
       font-family: inherit;
+    }
+
+    .field-shell select {
+      cursor: pointer;
+      appearance: none;
     }
 
     .field-icon {
@@ -1371,6 +1377,15 @@
           <label class="field-shell" for="path-input">
             <span class="field-icon">Path</span>
             <input id="path-input" type="text" placeholder="Enter local path or GitHub URL..." />
+          </label>
+          <label class="field-shell" for="language-input">
+            <span class="field-icon">Language</span>
+            <select id="language-input">
+              <option value="python">Python</option>
+              <option value="typescript">TypeScript</option>
+              <option value="go">Go</option>
+              <option value="java">Java</option>
+            </select>
           </label>
           <button id="scan-btn" class="action-btn">Scan Project</button>
           <label class="field-shell" for="search-input">

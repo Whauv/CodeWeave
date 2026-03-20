@@ -10,18 +10,26 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from groq import Groq
+
+try:
+    from dotenv import load_dotenv
+except Exception:
+    def load_dotenv(*_args: Any, **_kwargs: Any) -> bool:
+        logging.getLogger(__name__).warning(
+            "python-dotenv is unavailable; continuing without loading .env automatically."
+        )
+        return False
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from git_tracker import mutation_tracker
-from graph import blast_radius, graph_builder
+from graph import blast_radius
+from plugins import get_language_options, get_plugin
 
 
 load_dotenv()
@@ -32,7 +40,7 @@ FRONTEND_DIR = PROJECT_ROOT / "frontend"
 app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
 CORS(app)
 
-GRAPH_CACHE: dict[str, list[dict[str, Any]]] | None = None
+GRAPH_CACHE: dict[str, Any] | None = None
 DEFAULT_CHAT_PROVIDER = os.getenv("CHAT_PROVIDER", "groq").strip().lower()
 DEFAULT_GROQ_MODEL = os.getenv("CHAT_MODEL", "llama-3.1-8b-instant").strip()
 
@@ -357,12 +365,18 @@ def _clone_github_repo(repo_url: str, target_dir: Path) -> Path:
     return target_dir
 
 
-def _scan_repository(scan_root: Path) -> dict[str, list[dict[str, Any]]]:
-    graph_data = graph_builder.build_graph(str(scan_root))
-    graph_data["nodes"] = mutation_tracker.track_mutations(
-        str(scan_root), graph_data.get("nodes", [])
-    )
-    return graph_data
+def _scan_repository(scan_root: Path, language: str) -> dict[str, Any]:
+    plugin = get_plugin(language)
+    return plugin.scan(str(scan_root))
+
+
+@app.get("/api/languages")
+def get_languages() -> Any:
+    try:
+        return jsonify({"languages": get_language_options()})
+    except Exception as exc:
+        LOGGER.exception("Failed to fetch languages: %s", exc)
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.post("/api/scan")
@@ -371,6 +385,7 @@ def scan_project() -> Any:
     try:
         payload = request.get_json(silent=True) or {}
         project_input = str(payload.get("path") or "").strip()
+        language = str(payload.get("language") or "python").strip().lower()
         if not project_input:
             return jsonify({"error": "Invalid project path"}), 400
 
@@ -379,12 +394,12 @@ def scan_project() -> Any:
             with tempfile.TemporaryDirectory(prefix="codeweave_repo_") as temp_dir:
                 clone_path = Path(temp_dir) / "repo"
                 _clone_github_repo(repo_url, clone_path)
-                graph_data = _scan_repository(clone_path)
+                graph_data = _scan_repository(clone_path, language)
         else:
             resolved_path = Path(project_input).expanduser().resolve()
             if not resolved_path.exists() or not resolved_path.is_dir():
                 return jsonify({"error": "Invalid project path"}), 400
-            graph_data = _scan_repository(resolved_path)
+            graph_data = _scan_repository(resolved_path, language)
 
         GRAPH_CACHE = graph_data
         return jsonify(graph_data)
@@ -484,4 +499,5 @@ def serve_frontend_asset(asset_path: str) -> Any:
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5050, debug=True)
+    debug_enabled = os.getenv("FLASK_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
+    app.run(host="0.0.0.0", port=5050, debug=debug_enabled, use_reloader=False)
