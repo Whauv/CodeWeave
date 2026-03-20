@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -54,19 +55,149 @@ def _safe_join_names(values: list[str], limit: int = 12) -> str:
     return f"{shown}, and {len(values) - limit} more"
 
 
+def _build_node_index() -> dict[str, dict[str, Any]]:
+    if GRAPH_CACHE is None:
+        return {}
+    return {
+        str(node.get("id")): node
+        for node in GRAPH_CACHE.get("nodes", [])
+        if node.get("id") is not None
+    }
+
+
+def _build_edge_pairs() -> list[tuple[str, str]]:
+    if GRAPH_CACHE is None:
+        return []
+    pairs: list[tuple[str, str]] = []
+    for edge in GRAPH_CACHE.get("edges", []):
+        source = str(edge.get("source") or "").strip()
+        target = str(edge.get("target") or "").strip()
+        if source and target:
+            pairs.append((source, target))
+    return pairs
+
+
+def _format_file_label(file_path: str) -> str:
+    normalized = str(file_path or "").replace("\\", "/").strip()
+    if not normalized:
+        return "unknown module"
+    return normalized.split("/")[-1] or normalized
+
+
+def _collect_module_coupling(
+    nodes_by_id: dict[str, dict[str, Any]], edge_pairs: list[tuple[str, str]]
+) -> list[tuple[str, str, int]]:
+    counts: Counter[tuple[str, str]] = Counter()
+    for source_id, target_id in edge_pairs:
+        source_node = nodes_by_id.get(source_id, {})
+        target_node = nodes_by_id.get(target_id, {})
+        source_file = str(source_node.get("file") or "").strip()
+        target_file = str(target_node.get("file") or "").strip()
+        if not source_file or not target_file or source_file == target_file:
+            continue
+        pair = tuple(sorted((source_file, target_file)))
+        counts[pair] += 1
+    return [
+        (_format_file_label(left), _format_file_label(right), count)
+        for (left, right), count in counts.most_common(6)
+    ]
+
+
+def _collect_top_modules(nodes: list[dict[str, Any]]) -> list[tuple[str, int]]:
+    counts: Counter[str] = Counter()
+    for node in nodes:
+        file_path = str(node.get("file") or "").strip()
+        if file_path:
+            counts[_format_file_label(file_path)] += 1
+    return counts.most_common(6)
+
+
+def _collect_hotspots(nodes: list[dict[str, Any]]) -> list[str]:
+    hotspot_nodes = [
+        str(node.get("name") or "unknown")
+        for node in nodes
+        if str(node.get("mutation_status") or "").lower() == "hotspot"
+    ]
+    return hotspot_nodes[:8]
+
+
+def _collect_feature_candidates(
+    selected_node: dict[str, Any] | None,
+    nodes_by_id: dict[str, dict[str, Any]],
+    edge_pairs: list[tuple[str, str]],
+) -> list[str]:
+    module_counts: Counter[str] = Counter()
+    if selected_node is not None:
+        selected_file = str(selected_node.get("file") or "").strip()
+        if selected_file:
+            module_counts[_format_file_label(selected_file)] += 4
+        selected_id = str(selected_node.get("id") or "").strip()
+        for source_id, target_id in edge_pairs:
+            if source_id == selected_id:
+                target_file = str((nodes_by_id.get(target_id) or {}).get("file") or "").strip()
+                if target_file:
+                    module_counts[_format_file_label(target_file)] += 2
+            if target_id == selected_id:
+                source_file = str((nodes_by_id.get(source_id) or {}).get("file") or "").strip()
+                if source_file:
+                    module_counts[_format_file_label(source_file)] += 2
+    else:
+        for module_name, count in _collect_top_modules(list(nodes_by_id.values()))[:5]:
+            module_counts[module_name] += count
+    return [name for name, _ in module_counts.most_common(5)]
+
+
+def _build_project_context() -> str:
+    if GRAPH_CACHE is None:
+        return "No graph has been scanned yet."
+
+    nodes = GRAPH_CACHE.get("nodes", [])
+    edges = GRAPH_CACHE.get("edges", [])
+    nodes_by_id = _build_node_index()
+    edge_pairs = _build_edge_pairs()
+    coupled_modules = _collect_module_coupling(nodes_by_id, edge_pairs)
+    top_modules = _collect_top_modules(nodes)
+    hotspots = _collect_hotspots(nodes)
+
+    lines = [
+        f"Project stats: {len(nodes)} nodes, {len(edges)} edges.",
+        f"Most populated modules: {_safe_join_names([f'{name} ({count})' for name, count in top_modules], limit=6)}",
+        f"Hotspot nodes: {_safe_join_names(hotspots, limit=6)}",
+    ]
+
+    if coupled_modules:
+        lines.append(
+            "Most tightly coupled modules: "
+            + _safe_join_names(
+                [f"{left} <-> {right} ({count} edges)" for left, right, count in coupled_modules],
+                limit=5,
+            )
+        )
+    else:
+        lines.append("Most tightly coupled modules: None identified yet.")
+
+    return "\n".join(lines)
+
+
 def _build_chat_context(node_id: str | None) -> str:
     if GRAPH_CACHE is None:
         return "No graph has been scanned yet."
 
     nodes = GRAPH_CACHE.get("nodes", [])
     edges = GRAPH_CACHE.get("edges", [])
-    lines = [
-        f"Project stats: {len(nodes)} nodes, {len(edges)} edges.",
-    ]
+    nodes_by_id = _build_node_index()
+    edge_pairs = _build_edge_pairs()
+    lines = [_build_project_context()]
 
     if not node_id:
         lines.append("No specific node selected.")
-        lines.append("Answer project-level questions using the available graph data.")
+        lines.append(
+            "Answer project-level questions using graph structure, hotspots, and module coupling."
+        )
+        feature_candidates = _collect_feature_candidates(None, nodes_by_id, edge_pairs)
+        lines.append(
+            f"Good candidate modules for new features: {_safe_join_names(feature_candidates, limit=5)}"
+        )
         return "\n".join(lines)
 
     node = _get_node_from_cache(node_id)
@@ -76,14 +207,23 @@ def _build_chat_context(node_id: str | None) -> str:
 
     callers: list[str] = []
     callees: list[str] = []
-    node_by_id = {item.get("id"): item for item in nodes}
-    for edge in edges:
-        if edge.get("target") == node_id:
-            source_node = node_by_id.get(edge.get("source"))
-            callers.append((source_node or {}).get("name") or str(edge.get("source")))
-        if edge.get("source") == node_id:
-            target_node = node_by_id.get(edge.get("target"))
-            callees.append((target_node or {}).get("name") or str(edge.get("target")))
+    sibling_nodes: list[str] = []
+    module_name = _format_file_label(str(node.get("file") or ""))
+    for item in nodes:
+        if item.get("id") == node_id:
+            continue
+        if str(item.get("file") or "") == str(node.get("file") or ""):
+            sibling_nodes.append(str(item.get("name") or "unknown"))
+    for source_id, target_id in edge_pairs:
+        if target_id == node_id:
+            source_node = nodes_by_id.get(source_id)
+            callers.append((source_node or {}).get("name") or source_id)
+        if source_id == node_id:
+            target_node = nodes_by_id.get(target_id)
+            callees.append((target_node or {}).get("name") or target_id)
+
+    blast_info = blast_radius.compute_blast_radius(GRAPH_CACHE, node_id)
+    feature_candidates = _collect_feature_candidates(node, nodes_by_id, edge_pairs)
 
     lines.extend(
         [
@@ -92,9 +232,13 @@ def _build_chat_context(node_id: str | None) -> str:
             f"- name: {node.get('name')}",
             f"- type: {node.get('type')}",
             f"- file: {node.get('file')}:{node.get('line')}",
+            f"- module label: {module_name}",
             f"- summary: {node.get('summary') or 'No summary available.'}",
             f"- callers: {_safe_join_names(callers)}",
             f"- callees: {_safe_join_names(callees)}",
+            f"- same-module neighbors: {_safe_join_names(sibling_nodes)}",
+            f"- blast radius: {blast_info.get('summary') or 'No blast radius available.'}",
+            f"- recommended feature placement modules: {_safe_join_names(feature_candidates, limit=5)}",
         ]
     )
     return "\n".join(lines)
@@ -110,7 +254,11 @@ def _build_chat_messages(
         "You are CodeWeave Assistant, a helpful software architecture guide. "
         "Use only the provided context when stating project specifics. "
         "If context is missing, clearly say so and ask for a scan or a better question. "
-        "Keep answers concise and actionable."
+        "Keep answers concise and actionable. "
+        "When asked what breaks if code changes, use callers, callees, and blast radius. "
+        "When asked where to add a feature, recommend likely modules or nodes and explain why. "
+        "When asked which modules are tightly coupled, rely on module coupling data from the context. "
+        "Prefer short bullet points or short paragraphs with evidence."
     )
 
     messages: list[dict[str, str]] = [
