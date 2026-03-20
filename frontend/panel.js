@@ -96,7 +96,7 @@ function createChatSession(nodeId, nodeName) {
     messages: [
       {
         role: "assistant",
-        content: `Ready to help with ${formattedNodeName === "Project" ? "this project" : formattedNodeName}. Ask about logic, dependencies, risks, or impact.`,
+        content: `Ready to help with ${formattedNodeName === "Project" ? "this project" : formattedNodeName}. Ask what breaks if you change something, where a feature should live, or which modules are tightly coupled.`,
       },
     ],
   };
@@ -213,7 +213,7 @@ function renderChatMessages() {
   if (!activeSession || !Array.isArray(activeSession.messages) || activeSession.messages.length === 0) {
     const empty = document.createElement("div");
     empty.className = "chat-empty";
-    empty.textContent = "Ask about the selected node or overall project architecture.";
+    empty.textContent = "Ask what breaks if you change a node, where a feature should live, or which modules are tightly coupled.";
     messages.appendChild(empty);
   } else {
     activeSession.messages.forEach((item) => {
@@ -225,7 +225,7 @@ function renderChatMessages() {
   }
 
   if (hint) {
-    hint.textContent = `Uses provider: ${DEFAULT_CHAT_PROVIDER} (configurable later).`;
+    hint.textContent = `Try: "What breaks if I change this?", "Where should I add feature X?", or "Which modules are tightly coupled?"`;
   }
 
   messages.scrollTop = messages.scrollHeight;

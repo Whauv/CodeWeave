@@ -557,6 +557,7 @@
       border-radius: 24px;
       overflow: hidden;
       background: var(--panel-strong);
+      contain: layout paint style;
     }
 
     .graph-shell::before {
@@ -726,6 +727,8 @@
       display: block;
       position: relative;
       z-index: 1;
+      transform: translateZ(0);
+      will-change: transform;
     }
 
     .node-tooltip {
@@ -816,6 +819,7 @@
       flex-direction: column;
       padding: 18px;
       gap: 14px;
+      backdrop-filter: none;
     }
 
     #detail-panel {
@@ -825,6 +829,9 @@
       min-height: 0;
       overflow-y: auto;
       padding-right: 4px;
+      overscroll-behavior: contain;
+      contain: content;
+      transform: translateZ(0);
     }
 
     #detail-panel.hidden {
@@ -1423,7 +1430,6 @@
             <button id="theme-toggle-btn" class="ghost-btn">Light Theme</button>
             <button id="graph-load-more-btn" class="ghost-btn">Load More</button>
             <button id="graph-show-all-btn" class="ghost-btn">Show All</button>
-            <button id="clear-blast-btn" class="ghost-btn">Clear Blast View</button>
             <button id="export-svg-btn" class="ghost-btn">Export SVG</button>
             <button id="export-png-btn" class="ghost-btn">Export PNG</button>
             <button id="export-json-btn" class="ghost-btn">Export JSON</button>
@@ -1529,6 +1535,7 @@
             <div id="churn-info"></div>
             <div class="panel-actions">
               <button id="simulate-blast-btn" class="panel-action" disabled>Simulate Blast Radius</button>
+              <button id="clear-blast-btn" class="panel-action">Clear Blast View</button>
               <button id="view-source-btn" class="panel-action" disabled>Open Source</button>
             </div>
           </div>
