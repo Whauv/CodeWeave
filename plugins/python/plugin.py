@@ -14,15 +14,18 @@ class PythonLanguagePlugin(BaseLanguagePlugin):
     supports_mutation_tracking = True
     ready = True
 
-    def scan(self, root_path: str) -> dict[str, Any]:
-        graph_data = graph_builder.build_graph(root_path)
-        graph_data["nodes"] = mutation_tracker.track_mutations(
-            root_path, graph_data.get("nodes", [])
-        )
+    def scan(self, root_path: str, **options: Any) -> dict[str, Any]:
+        include_summaries = bool(options.get("include_summaries", True))
+        include_mutation_tracking = bool(options.get("include_mutation_tracking", True))
+        graph_data = graph_builder.build_graph(root_path, include_summaries=include_summaries)
+        if include_mutation_tracking:
+            graph_data["nodes"] = mutation_tracker.track_mutations(
+                root_path, graph_data.get("nodes", [])
+            )
         graph_data["meta"] = {
             "language": self.language,
             "plugin_label": self.label,
-            "mode": "full",
+            "mode": "full" if include_summaries else "lightweight",
         }
         return graph_data
 

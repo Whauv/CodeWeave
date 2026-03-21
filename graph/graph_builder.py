@@ -11,8 +11,18 @@ if str(PROJECT_ROOT) not in sys.path:
 from parser import ast_extractor, summarizer
 
 
-def build_graph(root_path: str) -> dict[str, list[dict[str, Any]]]:
+def build_graph(root_path: str, include_summaries: bool = True) -> dict[str, list[dict[str, Any]]]:
     graph_data = ast_extractor.extract(root_path)
+    for node in graph_data.get("nodes", []):
+        if node.get("type") != "function":
+            node["summary"] = "Class definition and methods."
+
+    if not include_summaries:
+        for node in graph_data.get("nodes", []):
+            if node.get("type") == "function":
+                node["summary"] = "Function definition."
+        return graph_data
+
     function_nodes: list[dict[str, str]] = []
     for node in graph_data.get("nodes", []):
         if node.get("type") == "function":
@@ -23,7 +33,7 @@ def build_graph(root_path: str) -> dict[str, list[dict[str, Any]]]:
                 }
             )
         else:
-            node["summary"] = "Class definition and methods."
+            node["summary"] = node.get("summary") or "Class definition and methods."
 
     summaries = summarizer.summarize_nodes(function_nodes)
     for node in graph_data.get("nodes", []):
