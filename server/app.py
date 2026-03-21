@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
+import hashlib
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -41,6 +44,8 @@ app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
 CORS(app)
 
 GRAPH_CACHE: dict[str, Any] | None = None
+SCAN_CONTEXT: dict[str, Any] | None = None
+HISTORY_GRAPH_CACHE: dict[str, dict[str, Any]] = {}
 DEFAULT_CHAT_PROVIDER = os.getenv("CHAT_PROVIDER", "groq").strip().lower()
 DEFAULT_GROQ_MODEL = os.getenv("CHAT_MODEL", "llama-3.1-8b-instant").strip()
 
@@ -334,23 +339,13 @@ def _normalize_github_repo_url(url_value: str) -> str:
     return f"https://github.com/{owner}/{repo}.git"
 
 
-def _clone_github_repo(repo_url: str, target_dir: Path) -> Path:
+def _clone_github_repo(repo_url: str, target_dir: Path, include_all_branches: bool = False) -> Path:
     try:
-        result = subprocess.run(
-            [
-                "git",
-                "clone",
-                "--depth",
-                "1",
-                "--single-branch",
-                repo_url,
-                str(target_dir),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=300,
-        )
+        clone_args = ["git", "clone", "--depth", "1"]
+        if not include_all_branches:
+            clone_args.append("--single-branch")
+        clone_args.extend([repo_url, str(target_dir)])
+        result = subprocess.run(clone_args, capture_output=True, text=True, check=False, timeout=300)
     except FileNotFoundError as exc:
         raise ValueError("Git is not installed or not available in PATH") from exc
     except subprocess.TimeoutExpired as exc:
@@ -365,9 +360,220 @@ def _clone_github_repo(repo_url: str, target_dir: Path) -> Path:
     return target_dir
 
 
-def _scan_repository(scan_root: Path, language: str) -> dict[str, Any]:
+def _fetch_all_remote_branches(repo_root: Path, depth: int = 160) -> subprocess.CompletedProcess[str]:
+    return _run_git_command(
+        repo_root,
+        [
+            "fetch",
+            "--prune",
+            "--tags",
+            "--depth",
+            str(depth),
+            "origin",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ],
+        timeout=300,
+    )
+
+
+def _ensure_cached_repo(repo_url: str, include_all_branches: bool = False) -> Path:
+    repo_hash = hashlib.md5(repo_url.encode("utf-8")).hexdigest()[:12]
+    cache_root = Path(tempfile.gettempdir()) / "codeweave_repo_cache"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    target_dir = cache_root / repo_hash
+
+    if target_dir.exists() and (target_dir / ".git").exists():
+        if include_all_branches:
+            result = _fetch_all_remote_branches(target_dir)
+        else:
+            result = subprocess.run(
+                ["git", "-C", str(target_dir), "fetch", "--depth", "40", "origin"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=180,
+            )
+        if result.returncode != 0:
+            LOGGER.warning("Failed to refresh cached repo %s: %s", repo_url, result.stderr or result.stdout)
+        return target_dir
+
+    if target_dir.exists():
+        shutil.rmtree(target_dir, ignore_errors=True)
+
+    return _clone_github_repo(repo_url, target_dir, include_all_branches=include_all_branches)
+
+
+def _resolve_scan_source(project_input: str, include_all_branches: bool = False) -> tuple[Path, str, str]:
+    if project_input.startswith(("http://", "https://")):
+        repo_url = _normalize_github_repo_url(project_input)
+        clone_path = _ensure_cached_repo(repo_url, include_all_branches=include_all_branches)
+        return clone_path, repo_url, "github"
+    resolved_path = Path(project_input).expanduser().resolve()
+    if not resolved_path.exists() or not resolved_path.is_dir():
+        raise ValueError("Invalid project path")
+    return resolved_path, str(resolved_path), "local"
+
+
+def _is_git_repo(repo_root: Path) -> bool:
+    return repo_root.exists() and (repo_root / ".git").exists()
+
+
+def _run_git_command(
+    repo_root: Path,
+    args: list[str],
+    timeout: int = 120,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(repo_root), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+    )
+
+
+def _get_commit_count(repo_root: Path) -> int:
+    result = _run_git_command(repo_root, ["rev-list", "--count", "--all"], timeout=60)
+    if result.returncode != 0:
+        return 0
+    try:
+        return int((result.stdout or "0").strip())
+    except ValueError:
+        return 0
+
+
+def _get_head_branch(repo_root: Path) -> str:
+    result = _run_git_command(repo_root, ["rev-parse", "--abbrev-ref", "HEAD"], timeout=60)
+    if result.returncode != 0:
+        return "HEAD"
+    return (result.stdout or "HEAD").strip()
+
+
+def _is_shallow_repository(repo_root: Path) -> bool:
+    result = _run_git_command(repo_root, ["rev-parse", "--is-shallow-repository"], timeout=60)
+    if result.returncode != 0:
+        return False
+    return (result.stdout or "").strip().lower() == "true"
+
+
+def _ensure_repo_history(repo_root: Path, desired_commits: int = 40) -> dict[str, Any]:
+    before_count = _get_commit_count(repo_root)
+    is_shallow = _is_shallow_repository(repo_root)
+    fetched = False
+    fetch_error = ""
+    head_branch = _get_head_branch(repo_root)
+
+    if is_shallow and before_count < desired_commits:
+        deepen_by = max(desired_commits * 2, 120)
+        fetch_result = _run_git_command(
+            repo_root,
+            ["fetch", "--unshallow", "--tags", "origin"],
+            timeout=240,
+        )
+        fetched = fetch_result.returncode == 0
+        if fetch_result.returncode != 0:
+            fallback_result = _run_git_command(
+                repo_root,
+                ["fetch", "--deepen", str(deepen_by), "--tags", "origin", head_branch],
+                timeout=240,
+            )
+            fetched = fallback_result.returncode == 0
+            if fallback_result.returncode != 0:
+                fetch_error = (fallback_result.stderr or fallback_result.stdout or fetch_result.stderr or fetch_result.stdout or "").strip()
+                LOGGER.warning("Failed to deepen git history for %s: %s", repo_root, fetch_error)
+
+    after_count = _get_commit_count(repo_root)
+    return {
+        "before_count": before_count,
+        "after_count": after_count,
+        "is_shallow": _is_shallow_repository(repo_root),
+        "attempted_fetch": is_shallow and before_count < desired_commits,
+        "fetched": fetched,
+        "fetch_error": fetch_error,
+        "head_branch": head_branch,
+    }
+
+
+def _list_remote_branch_names(repo_root: Path) -> list[str]:
+    result = _run_git_command(
+        repo_root,
+        ["for-each-ref", "refs/remotes/origin", "--format=%(refname:short)"],
+        timeout=60,
+    )
+    if result.returncode != 0:
+        return []
+    branches = [
+        line.strip().replace("origin/", "", 1)
+        for line in (result.stdout or "").splitlines()
+        if line.strip() and line.strip() != "origin/HEAD"
+    ]
+    return sorted(set(branches))
+
+
+def _list_repo_commits(repo_root: Path, limit: int = 40) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    if not _is_git_repo(repo_root):
+        raise ValueError("Time-travel requires a git repository.")
+
+    history_meta = _ensure_repo_history(repo_root, desired_commits=limit)
+
+    result = _run_git_command(
+        repo_root,
+        [
+            "log",
+            f"--max-count={limit}",
+            "--all",
+            "--date-order",
+            "--reverse",
+            "--date=short",
+            "--pretty=format:%H%x1f%h%x1f%ad%x1f%an%x1f%s",
+        ],
+        timeout=120,
+    )
+    if result.returncode != 0:
+        raise ValueError(result.stderr.strip() or "Failed to read git history")
+
+    commits: list[dict[str, str]] = []
+    for line in (result.stdout or "").splitlines():
+        parts = line.split("\x1f")
+        if len(parts) != 5:
+            continue
+        full_hash, short_hash, date_value, author, subject = parts
+        commits.append(
+            {
+                "hash": full_hash,
+                "short_hash": short_hash,
+                "date": date_value,
+                "author": author,
+                "message": subject,
+            }
+        )
+    history_meta["returned_count"] = len(commits)
+    history_meta["branch_names"] = _list_remote_branch_names(repo_root)
+    return commits, history_meta
+
+
+def _extract_commit_snapshot(repo_root: Path, commit_hash: str) -> Path:
+    temp_dir = Path(tempfile.mkdtemp(prefix="codeweave_history_"))
+    archive = subprocess.run(
+        ["git", "-C", str(repo_root), "archive", "--format=tar", commit_hash],
+        capture_output=True,
+        check=False,
+        timeout=240,
+    )
+    if archive.returncode != 0:
+        raise ValueError("Failed to export commit snapshot")
+
+    tar_path = temp_dir / "snapshot.tar"
+    tar_path.write_bytes(archive.stdout)
+    with tarfile.open(tar_path) as tar_file:
+        tar_file.extractall(temp_dir / "repo")
+    tar_path.unlink(missing_ok=True)
+    return temp_dir / "repo"
+
+
+def _scan_repository(scan_root: Path, language: str, **options: Any) -> dict[str, Any]:
     plugin = get_plugin(language)
-    return plugin.scan(str(scan_root))
+    return plugin.scan(str(scan_root), **options)
 
 
 @app.get("/api/languages")
@@ -381,7 +587,7 @@ def get_languages() -> Any:
 
 @app.post("/api/scan")
 def scan_project() -> Any:
-    global GRAPH_CACHE
+    global GRAPH_CACHE, SCAN_CONTEXT
     try:
         payload = request.get_json(silent=True) or {}
         project_input = str(payload.get("path") or "").strip()
@@ -389,19 +595,19 @@ def scan_project() -> Any:
         if not project_input:
             return jsonify({"error": "Invalid project path"}), 400
 
-        if project_input.startswith(("http://", "https://")):
-            repo_url = _normalize_github_repo_url(project_input)
-            with tempfile.TemporaryDirectory(prefix="codeweave_repo_") as temp_dir:
-                clone_path = Path(temp_dir) / "repo"
-                _clone_github_repo(repo_url, clone_path)
-                graph_data = _scan_repository(clone_path, language)
-        else:
-            resolved_path = Path(project_input).expanduser().resolve()
-            if not resolved_path.exists() or not resolved_path.is_dir():
-                return jsonify({"error": "Invalid project path"}), 400
-            graph_data = _scan_repository(resolved_path, language)
+        scan_root, normalized_target, source_kind = _resolve_scan_source(project_input)
+        graph_data = _scan_repository(scan_root, language)
 
         GRAPH_CACHE = graph_data
+        SCAN_CONTEXT = {
+            "project_input": project_input,
+            "target": normalized_target,
+            "scan_root": str(scan_root),
+            "language": language,
+            "is_git_repo": _is_git_repo(scan_root),
+            "source_kind": source_kind,
+        }
+        HISTORY_GRAPH_CACHE.clear()
         return jsonify(graph_data)
     except Exception as exc:
         LOGGER.exception("Scan failed: %s", exc)
@@ -477,6 +683,65 @@ def chat_about_node() -> Any:
         )
     except Exception as exc:
         LOGGER.exception("Chat failed: %s", exc)
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.get("/api/history")
+def get_time_travel_commits() -> Any:
+    try:
+        if SCAN_CONTEXT is None:
+            return jsonify({"error": "No graph scanned yet"}), 404
+        source_kind = str(SCAN_CONTEXT.get("source_kind") or "local")
+        repo_root = Path(str(SCAN_CONTEXT.get("scan_root") or "")).resolve()
+        if source_kind == "github":
+            repo_url = str(SCAN_CONTEXT.get("target") or "").strip()
+            if repo_url:
+                repo_root = _ensure_cached_repo(repo_url, include_all_branches=True)
+        commits, history_meta = _list_repo_commits(repo_root)
+        return jsonify(
+            {
+                "target": SCAN_CONTEXT.get("target"),
+                "language": SCAN_CONTEXT.get("language"),
+                "source_kind": source_kind,
+                "commits": commits,
+                "history_meta": history_meta,
+            }
+        )
+    except Exception as exc:
+        LOGGER.exception("History fetch failed: %s", exc)
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.get("/api/history/<commit_hash>")
+def get_history_graph(commit_hash: str) -> Any:
+    try:
+        if SCAN_CONTEXT is None:
+            return jsonify({"error": "No graph scanned yet"}), 404
+
+        repo_root = Path(str(SCAN_CONTEXT.get("scan_root") or "")).resolve()
+        language = str(SCAN_CONTEXT.get("language") or "python")
+        cache_key = f"{repo_root}::{language}::{commit_hash}"
+        if cache_key in HISTORY_GRAPH_CACHE:
+            return jsonify(HISTORY_GRAPH_CACHE[cache_key])
+
+        snapshot_root = _extract_commit_snapshot(repo_root, commit_hash)
+        graph_data = _scan_repository(
+            snapshot_root,
+            language,
+            include_summaries=False,
+            include_mutation_tracking=False,
+        )
+        graph_data.setdefault("meta", {})
+        graph_data["meta"].update(
+            {
+                "history_commit": commit_hash,
+                "history_mode": True,
+            }
+        )
+        HISTORY_GRAPH_CACHE[cache_key] = graph_data
+        return jsonify(graph_data)
+    except Exception as exc:
+        LOGGER.exception("History graph fetch failed: %s", exc)
         return jsonify({"error": str(exc)}), 400
 
 

@@ -115,6 +115,118 @@
       display: flex;
     }
 
+    .history-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 12;
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 18px;
+      background: linear-gradient(180deg, rgba(6, 8, 9, 0.08), rgba(6, 8, 9, 0.56));
+      pointer-events: none;
+    }
+
+    .history-overlay.visible {
+      display: flex;
+    }
+
+    .history-card {
+      width: min(880px, calc(100% - 12px));
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+      border-radius: 24px;
+      border: 1px solid var(--border);
+      background: rgba(14, 17, 18, 0.95);
+      box-shadow: var(--shadow);
+      pointer-events: auto;
+    }
+
+    body[data-theme="light"] .history-card {
+      background: rgba(249, 252, 254, 0.97);
+    }
+
+    .history-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .history-title {
+      margin: 0 0 6px;
+      font-size: 1.1rem;
+    }
+
+    .history-copy {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 0.92rem;
+    }
+
+    .history-controls {
+      display: grid;
+      gap: 12px;
+    }
+
+    .history-topbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .history-scrub-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .history-range {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .history-commit-card {
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .history-commit-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .history-commit-title {
+      font-size: 1rem;
+      color: var(--text);
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    .history-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      font-size: 0.84rem;
+    }
+
     .scan-card {
       width: min(360px, calc(100% - 40px));
       padding: 24px;
@@ -1432,6 +1544,14 @@
         width: 100%;
       }
 
+      .history-card {
+        padding: 14px;
+      }
+
+      .history-scrub-row {
+        grid-template-columns: 1fr;
+      }
+
       .ghost-btn,
       .action-btn,
       .panel-action {
@@ -1551,6 +1671,7 @@
             <button id="tree-layout-btn" class="ghost-btn active">Tree Layout</button>
             <button id="force-layout-btn" class="ghost-btn">Force Layout</button>
             <button id="cluster-toggle-btn" class="ghost-btn active">Cluster View</button>
+            <button id="history-btn" class="ghost-btn">Evolution</button>
             <button id="theme-toggle-btn" class="ghost-btn">Light Theme</button>
             <button id="graph-load-more-btn" class="ghost-btn">Load More</button>
             <button id="graph-show-all-btn" class="ghost-btn">Show All</button>
@@ -1607,6 +1728,35 @@
               <p id="scan-overlay-copy" class="scan-copy">
                 Parsing Python files, linking calls, and preparing the dependency map.
               </p>
+            </div>
+          </div>
+          <div id="history-overlay" class="history-overlay">
+            <div class="history-card">
+              <div class="history-header">
+                <div>
+                  <h3 class="history-title">Project evolution</h3>
+                  <p class="history-copy">
+                    Scrub through git history and watch how the architecture map changed over time.
+                  </p>
+                </div>
+                <button id="history-close-btn" class="panel-close" title="Close evolution view">x</button>
+              </div>
+              <div class="history-controls">
+                <div class="history-topbar">
+                  <button id="history-play-btn" class="ghost-btn">Play Timeline</button>
+                  <button id="history-live-btn" class="ghost-btn">Back To Live Graph</button>
+                  <div id="history-status" class="history-badge">Load a scanned git repo to begin.</div>
+                </div>
+                <div class="history-scrub-row">
+                  <div id="history-start-label" class="history-badge">Oldest</div>
+                  <input id="history-range" class="history-range" type="range" min="0" max="0" value="0" />
+                  <div id="history-end-label" class="history-badge">Newest</div>
+                </div>
+                <div class="history-commit-card">
+                  <div id="history-commit-title" class="history-commit-title">No timeline loaded yet.</div>
+                  <div id="history-commit-meta" class="history-commit-line"></div>
+                </div>
+              </div>
             </div>
           </div>
           <svg id="graph-svg"></svg>

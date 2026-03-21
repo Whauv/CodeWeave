@@ -124,7 +124,7 @@ class GoLanguagePlugin(BaseLanguagePlugin):
     extensions = (".go",)
     ready = True
 
-    def scan(self, root_path: str) -> dict[str, Any]:
+    def scan(self, root_path: str, **options: Any) -> dict[str, Any]:
         return build_graph_from_nodes(
             language=self.language,
             label=self.label,

@@ -66,7 +66,7 @@ class BaseLanguagePlugin(ABC):
         )
 
     @abstractmethod
-    def scan(self, root_path: str) -> dict[str, Any]:
+    def scan(self, root_path: str, **options: Any) -> dict[str, Any]:
         raise NotImplementedError
 
 
