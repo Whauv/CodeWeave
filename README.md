@@ -156,14 +156,21 @@ codemapper/
 
 ## Screenshots
 
-- Main dashboard:
-  Shows the scan bar, graph workspace, mutation legend, and right-side detail panel.
-- Selected-node workflow:
-  Shows callers/callees, AI summary, mutation status, chat, and blast-radius actions.
-- Evolution mode:
-  Shows the git-history scrubber and commit-by-commit architecture playback.
+### Main Dashboard
 
-If you want to publish screenshots in the repo, add image files under a docs or assets folder and reference them here.
+![Main dashboard](assets/screenshots/dashboard-empty.png)
+
+Shows the scan bar, graph workspace, mutation legend, and right-side detail panel before a graph is loaded.
+
+### Selected Node Workflow
+
+![Selected node workflow](assets/screenshots/dashboard-node-detail.png)
+
+Shows the graph populated with a scanned project, the selected node summary, saved chats, mutation context, and blast-radius actions.
+
+### Evolution Mode
+
+Add a future screenshot here when the time-travel timeline view is finalized.
 
 ## License
 
