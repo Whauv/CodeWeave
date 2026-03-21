@@ -20,9 +20,11 @@ CodeWeave scans a repository, extracts code symbols, builds a dependency graph, 
 - Git mutation overlays with PyDriller for Python repositories with git history
 - Interactive graph exploration with D3.js, Monaco source viewing, node search, detail drill-down, and graph-aware chat
 - Tree and force layout modes for exploring the codebase from different angles
+- Evolution mode for scrubbing through git history and viewing architecture snapshots commit by commit
 
 ## UI Highlights
 
+- Dashboard-style topology explorer with a scan bar, quick metrics, recent scans, and responsive layout behavior
 - Language selector in the top scan bar
 - Local-path and GitHub-repo scanning
 - Search by node name or summary
@@ -32,11 +34,14 @@ CodeWeave scans a repository, extracts code symbols, builds a dependency graph, 
 - Recent scan history and saved chat history
 - Light and dark themes
 - Split view, focus modes, and draggable pane divider
+- Node detail panel with summaries, chat, mutation data, blast controls, callers, and callees
+- Evolution overlay with timeline scrubber, commit playback, commit metadata, and a live-graph reset action
 - Export graph as SVG, PNG, or JSON
 
 ## Performance Notes
 
 - Summary generation is batched to reduce rate-limit pressure and speed up scans
+- If Groq rate-limits or JSON generation fails, the scan falls back quickly instead of hanging the graph build
 - Large non-project directories such as `.git`, `.venv`, `node_modules`, `dist`, and `build` are skipped
 - Graph panning and resizing were tuned to reduce UI lag on denser graphs
 - Flask startup is configured without the unstable debug reloader by default
@@ -96,6 +101,30 @@ Set-ExecutionPolicy -Scope Process Bypass
    `What breaks if I change this node?`
    `Where should I add feature X?`
    `Which modules are tightly coupled?`
+8. Click `Evolution` to open the time-travel view and scrub through repository history.
+
+## Evolution Mode
+
+Evolution mode opens a separate timeline panel over the graph and lets you:
+
+- inspect commit-by-commit snapshots of the scanned repository
+- scrub manually across the available commit range
+- play the timeline automatically when at least two commits are available
+- jump back to the current live graph instantly
+
+For GitHub scans, CodeWeave now tries to pull broader branch history for the timeline instead of relying only on the initial shallow scan state.
+
+Important note:
+- If the scanned repository exposes only one reachable commit, playback will stay disabled because there is no second snapshot to animate.
+
+## Current Interface
+
+The current UI includes:
+
+- a top command bar for path input, language selection, scanning, search, quick metrics, and recent scans
+- a graph workspace with tree/force layout switching, cluster view, export tools, evolution access, and mutation legend
+- a right-side inspection panel for summaries, chat, mutation context, blast-radius controls, and relationship tracing
+- a responsive layout that adapts across laptop and desktop screens
 
 ## Recommended Run Command
 
@@ -109,25 +138,32 @@ For the most stable local startup, use the project virtualenv:
 
 ```text
 codemapper/
-├── frontend/
-├── git_tracker/
-├── graph/
-├── parser/
-├── plugins/
-│   ├── python/
-│   ├── typescript/
-│   ├── go/
-│   └── java/
-├── server/
-├── .env
-├── requirements.txt
-├── summaries_cache.json
-└── README.md
++-- frontend/
++-- git_tracker/
++-- graph/
++-- parser/
++-- plugins/
+|   +-- python/
+|   +-- typescript/
+|   +-- go/
+|   \-- java/
++-- server/
++-- .env
++-- requirements.txt
++-- summaries_cache.json
+\-- README.md
 ```
 
 ## Screenshots
 
-_Add screenshots here._
+- Main dashboard:
+  Shows the scan bar, graph workspace, mutation legend, and right-side detail panel.
+- Selected-node workflow:
+  Shows callers/callees, AI summary, mutation status, chat, and blast-radius actions.
+- Evolution mode:
+  Shows the git-history scrubber and commit-by-commit architecture playback.
+
+If you want to publish screenshots in the repo, add image files under a docs or assets folder and reference them here.
 
 ## License
 
