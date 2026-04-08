@@ -7,7 +7,10 @@ import os
 from pathlib import Path
 from typing import Iterable
 
-from groq import Groq
+try:
+    from groq import Groq
+except Exception:
+    Groq = None
 
 
 logging.basicConfig(level=logging.INFO)
@@ -45,7 +48,7 @@ def _save_cache(cache: dict[str, str]) -> None:
 
 def _get_client() -> Groq | None:
     api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
+    if not api_key or Groq is None:
         return None
     return Groq(api_key=api_key)
 

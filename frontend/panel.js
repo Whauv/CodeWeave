@@ -2,6 +2,22 @@ function getNodeById(nodeId, graphData) {
   return graphData?.nodes?.find((node) => node.id === nodeId) || null;
 }
 
+function setActiveDetailNodeId(nodeId) {
+  window.__CODEWEAVE_ACTIVE_DETAIL_NODE_ID__ = nodeId || null;
+}
+
+function getActiveDetailNodeId() {
+  return window.__CODEWEAVE_ACTIVE_DETAIL_NODE_ID__ || null;
+}
+
+function getActiveDetailNode() {
+  const nodeId = getActiveDetailNodeId();
+  if (!nodeId) {
+    return null;
+  }
+  return getNodeById(nodeId, window.__CODEMAPPER_GRAPH__);
+}
+
 let activeChatNodeId = null;
 let chatSessions = [];
 let activeChatSessionId = null;
@@ -398,6 +414,7 @@ async function loadNodeDetail(node, graphData) {
 
     document.getElementById("detail-panel").classList.remove("hidden");
     document.getElementById("detail-shell").classList.remove("hidden");
+    setActiveDetailNodeId(node.id);
     document.getElementById("node-name").textContent = data.name || "Unknown Node";
     document.getElementById("node-file").textContent = `${data.file || "unknown"}:${data.line || 0}`;
     document.getElementById("node-summary").textContent = data.summary || "No summary available.";
@@ -484,10 +501,32 @@ function showBlastInfo(blastData) {
 function hidePanel() {
   document.getElementById("detail-panel").classList.add("hidden");
   document.getElementById("detail-shell").classList.add("hidden");
+  setActiveDetailNodeId(null);
+}
+
+function bindDetailPanelActions() {
+  document.getElementById("simulate-blast-btn")?.addEventListener("click", () => {
+    const node = getActiveDetailNode();
+    if (node && window.triggerBlastRadius) {
+      window.triggerBlastRadius(node);
+    }
+  });
+  document.getElementById("clear-blast-btn")?.addEventListener("click", () => {
+    if (window.clearBlastRadius) {
+      window.clearBlastRadius();
+    }
+  });
+  document.getElementById("view-source-btn")?.addEventListener("click", () => {
+    const node = getActiveDetailNode();
+    if (node && window.openMonacoModal) {
+      window.openMonacoModal(node.source_code || "# No source code available");
+    }
+  });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("panel-close-btn")?.addEventListener("click", hidePanel);
+  bindDetailPanelActions();
   initializeChatUi();
 });
 

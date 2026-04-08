@@ -1,0 +1,12 @@
+{
+  "name": "codeweave-smoke-tests",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Playwright smoke tests for the CodeWeave frontend",
+  "scripts": {
+    "smoke": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.0"
+  }
+}
