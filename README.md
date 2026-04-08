@@ -154,6 +154,62 @@ codemapper/
 \-- README.md
 ```
 
+## Architecture Notes
+
+- `server/app.py` is now a thin Flask composition layer that owns routing only.
+- `server/repository_service.py` encapsulates GitHub clone caching, git history access, and commit snapshot extraction.
+- `server/chat_service.py` builds graph-aware AI context so the chat endpoint does not mix HTTP concerns with architecture reasoning.
+- `server/state.py` centralizes in-memory graph and history state for the current process.
+- `frontend/browser_store.js` isolates browser persistence concerns such as IndexedDB graph snapshots and localStorage-backed UI history.
+- `frontend/graph_state.js` holds shared graph UI state so extracted frontend modules do not reach through the coordinator ad hoc.
+- `frontend/graph_renderer.js` owns SVG shell creation plus tree/force graph rendering concerns.
+- `frontend/graph_effects_controller.js` owns graph visual state such as search highlighting, hover tracing, and blast-radius styling.
+- `frontend/graph_ui_controller.js` owns theme, pane layout, export, Monaco, and toolbar interaction orchestration.
+- `frontend/history_controller.js` owns evolution timeline loading and playback behavior.
+- `frontend/node_interactions.js` owns tooltip behavior, cluster expansion, and node-level interaction wiring.
+- `frontend/scan_controller.js` owns scan submission, language loading, recent-scan persistence, and scan-overlay orchestration.
+- `plugins/` isolates language-specific graph extraction behind a common plugin contract.
+
+## Testing
+
+Run the current unit suite with:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+Run the full verified integration path with the project virtualenv:
+
+```powershell
+.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Run the browser smoke suite with Playwright after installing dev dependencies:
+
+```powershell
+npm install
+npm run smoke
+```
+
+The Playwright config now boots the local Flask app automatically, and the smoke suite scans a tiny TypeScript fixture repo to verify the end-to-end graph flow without depending on Groq availability.
+The browser suite also exercises blast-radius actions, export downloads, theme/history persistence, chat rendering, and Evolution mode on a temporary multi-commit git fixture.
+
+If your server is running on a different URL, set:
+
+```powershell
+$env:CODEWEAVE_BASE_URL="http://127.0.0.1:5050"
+```
+
+The suite currently covers:
+
+- blast-radius computation
+- plugin registry and TypeScript extraction smoke coverage
+- repository URL normalization and archive extraction safety
+- graph-aware chat context generation
+- Flask API route behavior for common success/error paths
+- end-to-end Flask integration for scan, graph, node, history, and history-snapshot flows under the project virtualenv
+- browser smoke checks for the dashboard shell and core graph controls via Playwright
+
 ## Screenshots
 
 ### Main Dashboard

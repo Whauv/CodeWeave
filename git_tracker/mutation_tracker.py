@@ -4,11 +4,23 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from pydriller import Repository
+try:
+    from pydriller import Repository
+except Exception:
+    Repository = None
 
 
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
+
+
+def _mark_nodes_stable(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for node in nodes:
+        node.setdefault("mutation_status", "stable")
+        node.setdefault("mutation_color", "#aaaaaa")
+        node.setdefault("churn_count", 0)
+        node.setdefault("last_modified_commit", None)
+    return nodes
 
 
 def _normalize_path(path_value: str | None, repo_root: Path) -> str:
@@ -23,14 +35,13 @@ def _normalize_path(path_value: str | None, repo_root: Path) -> str:
 
 def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     repo_root = Path(repo_path).resolve()
+    if Repository is None:
+        LOGGER.warning("PyDriller is unavailable; marking nodes as stable.")
+        return _mark_nodes_stable(nodes)
+
     if not repo_root.exists() or not (repo_root / ".git").exists():
         LOGGER.warning("Path is not a git repository: %s", repo_path)
-        for node in nodes:
-            node.setdefault("mutation_status", "stable")
-            node.setdefault("mutation_color", "#aaaaaa")
-            node.setdefault("churn_count", 0)
-            node.setdefault("last_modified_commit", None)
-        return nodes
+        return _mark_nodes_stable(nodes)
 
     file_map: dict[str, dict[str, Any]] = {}
     recent_files: list[str] = []
@@ -64,10 +75,10 @@ def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[st
                 current["last_seen_index"] = min(current.get("last_seen_index", commit_index), commit_index)
     except Exception as exc:
         LOGGER.warning("Unable to inspect git history for %s: %s", repo_path, exc)
-        return nodes
+        return _mark_nodes_stable(nodes)
 
     if not file_map:
-        return nodes
+        return _mark_nodes_stable(nodes)
 
     recent_five_files = set(recent_files[:5])
     recent_thirty_files = set(recent_files[:30])
