@@ -1,3 +1,18 @@
+const fs = require("fs");
+const path = require("path");
+
+function resolvePythonCommand() {
+  if (process.env.CODEWEAVE_PYTHON) {
+    return process.env.CODEWEAVE_PYTHON;
+  }
+
+  const venvPython = process.platform === "win32"
+    ? path.join(".venv", "Scripts", "python.exe")
+    : path.join(".venv", "bin", "python");
+
+  return fs.existsSync(venvPython) ? venvPython : "python";
+}
+
 /** @type {import('@playwright/test').PlaywrightTestConfig} */
 const config = {
   testDir: "./smoke",
@@ -7,10 +22,14 @@ const config = {
     headless: true,
   },
   webServer: {
-    command: ".venv\\Scripts\\python.exe server\\app.py",
+    command: `${resolvePythonCommand()} server/app.py`,
     url: "http://127.0.0.1:5050",
     timeout: 120000,
     reuseExistingServer: true,
+    env: {
+      ...process.env,
+      FLASK_DEBUG: "0",
+    },
   },
   reporter: [["list"]],
 };
