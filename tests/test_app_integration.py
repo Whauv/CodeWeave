@@ -77,9 +77,15 @@ class AppIntegrationTests(unittest.TestCase):
         payload = response.get_json()
         self.assertGreaterEqual(len(payload["nodes"]), 2)
         self.assertGreaterEqual(len(payload["edges"]), 1)
+        self.assertIn("insights", payload)
+        self.assertIn("edge_type_breakdown", payload["insights"])
 
         graph_response = self.client.get("/api/graph")
         self.assertEqual(graph_response.status_code, 200)
+
+        insights_response = self.client.get("/api/insights")
+        self.assertEqual(insights_response.status_code, 200)
+        self.assertIn("summary", insights_response.get_json())
 
         node_id = payload["nodes"][0]["id"]
         node_response = self.client.get(f"/api/node/{node_id}")

@@ -102,6 +102,17 @@ def get_graph() -> Any:
         return jsonify({"error": str(exc)}), 400
 
 
+@app.get("/api/insights")
+def get_insights() -> Any:
+    try:
+        if STATE.graph_cache is None:
+            return jsonify({"error": "No graph scanned yet"}), 404
+        return jsonify(STATE.graph_cache.get("insights", {}))
+    except Exception as exc:
+        LOGGER.exception("Insights fetch failed: %s", exc)
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.get("/api/node/<node_id>")
 def get_node(node_id: str) -> Any:
     try:

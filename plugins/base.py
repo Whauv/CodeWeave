@@ -38,6 +38,13 @@ IGNORED_CALL_NAMES = set(keyword.kwlist) | {
     "super",
     "this",
 }
+EDGE_STYLE_BY_TYPE = {
+    "call": {"label": "Calls", "color": "#95c1d6"},
+    "import": {"label": "Imports", "color": "#7cc4fa"},
+    "extends": {"label": "Extends", "color": "#f5c85b"},
+    "implements": {"label": "Implements", "color": "#66d7d1"},
+    "embeds": {"label": "Embeds", "color": "#af8bff"},
+}
 
 
 @dataclass(frozen=True)
@@ -83,6 +90,18 @@ class ExtractedNode:
     summary: str = ""
 
 
+@dataclass(frozen=True)
+class ExtractedEdge:
+    source_name: str
+    edge_type: str
+    target_name: str
+    source_file: str | None = None
+    target_file: str | None = None
+
+
+CallAliasMap = dict[tuple[str, str], dict[str, list[tuple[str, str | None]]]]
+
+
 def iter_source_files(root_path: str, extensions: tuple[str, ...]) -> list[Path]:
     root = Path(root_path).resolve()
     files: list[Path] = []
@@ -114,6 +133,10 @@ def read_source_file(file_path: Path) -> str:
 def get_node_id(language: str, file_path: str, symbol_name: str) -> str:
     payload = f"{language}::{Path(file_path).resolve()}::{symbol_name}"
     return hashlib.md5(payload.encode("utf-8")).hexdigest()
+
+
+def normalize_symbol_name(name: str) -> str:
+    return str(name or "").strip().lower()
 
 
 def line_number_at(source: str, index: int) -> int:
@@ -153,8 +176,75 @@ def extract_braced_block(source: str, start_index: int) -> str:
 
 
 def infer_call_names(source_code: str) -> set[str]:
-    calls = set(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", source_code))
+    direct_calls = set(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", source_code))
+    member_calls = {match[1] for match in re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(", source_code)}
+    calls = direct_calls | member_calls
     return {name for name in calls if name not in IGNORED_CALL_NAMES}
+
+
+def build_module_index(extracted_nodes: list[ExtractedNode]) -> dict[str, dict[str, set[str]]]:
+    module_index: dict[str, dict[str, set[str]]] = {}
+    for node in extracted_nodes:
+        file_path = str(Path(node.file).resolve())
+        file_index = module_index.setdefault(file_path, {})
+        lookup_names = {normalize_symbol_name(node.name), *(normalize_symbol_name(alias) for alias in node.aliases)}
+        for lookup_name in lookup_names:
+            if lookup_name:
+                file_index.setdefault(lookup_name, set()).add(node.name)
+    return module_index
+
+
+def resolve_module_target_names(
+    module_index: dict[str, dict[str, set[str]]],
+    target_file: str | None,
+    target_name: str,
+) -> list[tuple[str, str]]:
+    normalized_target = normalize_symbol_name(target_name)
+    if not normalized_target:
+        return []
+
+    if target_file:
+        resolved_file = str(Path(target_file).resolve())
+        names = module_index.get(resolved_file, {}).get(normalized_target, set())
+        if names:
+            return [(resolved_file, name) for name in sorted(names)]
+        return []
+
+    matches: list[tuple[str, str]] = []
+    for file_path, name_index in module_index.items():
+        for name in sorted(name_index.get(normalized_target, set())):
+            matches.append((file_path, name))
+    return matches
+
+
+def edge_style(edge_type: str) -> dict[str, str]:
+    return EDGE_STYLE_BY_TYPE.get(edge_type, {"label": edge_type.title(), "color": "#95c1d6"})
+
+
+def _resolve_node_ids_for_name(
+    name_index: dict[str, set[str]],
+    file_name_index: dict[tuple[str, str], set[str]],
+    file_path: str,
+    symbol_name: str,
+    explicit_targets: list[tuple[str, str | None]] | None = None,
+) -> set[str]:
+    resolved_ids: set[str] = set()
+    if explicit_targets:
+        for target_file, target_name in explicit_targets:
+            normalized_name = normalize_symbol_name(target_name or "")
+            if not normalized_name:
+                continue
+            if target_file:
+                resolved_ids.update(file_name_index.get((str(Path(target_file).resolve()), normalized_name), set()))
+            else:
+                resolved_ids.update(name_index.get(normalized_name, set()))
+        return resolved_ids
+
+    normalized_symbol = normalize_symbol_name(symbol_name)
+    resolved_ids.update(file_name_index.get((file_path, normalized_symbol), set()))
+    if not resolved_ids:
+        resolved_ids.update(name_index.get(normalized_symbol, set()))
+    return resolved_ids
 
 
 def build_graph_from_nodes(
@@ -162,22 +252,27 @@ def build_graph_from_nodes(
     label: str,
     root_path: str,
     extracted_nodes: list[ExtractedNode],
+    explicit_edges: list[ExtractedEdge] | None = None,
+    call_aliases: CallAliasMap | None = None,
 ) -> dict[str, Any]:
     nodes: list[dict[str, Any]] = []
     name_index: dict[str, set[str]] = {}
+    file_name_index: dict[tuple[str, str], set[str]] = {}
+    node_id_by_symbol: dict[tuple[str, str], str] = {}
 
     for extracted in extracted_nodes:
-        node_id = get_node_id(language, extracted.file, extracted.name)
+        resolved_file = str(Path(extracted.file).resolve())
+        node_id = get_node_id(language, resolved_file, extracted.name)
         node_payload: dict[str, Any] = {
             "id": node_id,
             "name": extracted.name,
-            "file": extracted.file,
+            "file": resolved_file,
             "line": extracted.line,
             "source_code": extracted.source_code,
             "type": extracted.node_type,
             "args": extracted.args,
             "summary": extracted.summary
-            or f"{label} {extracted.node_type} defined in {Path(extracted.file).name}.",
+            or f"{label} {extracted.node_type} defined in {Path(resolved_file).name}.",
             "mutation_status": "stable",
             "mutation_color": "#aaaaaa",
             "churn_count": 0,
@@ -187,25 +282,88 @@ def build_graph_from_nodes(
             node_payload["methods"] = list(extracted.methods)
         nodes.append(node_payload)
 
+        node_id_by_symbol[(resolved_file, extracted.name)] = node_id
         lookup_names = {extracted.name, *extracted.aliases}
         for lookup_name in lookup_names:
-            if lookup_name:
-                name_index.setdefault(lookup_name, set()).add(node_id)
+            normalized_lookup = normalize_symbol_name(lookup_name)
+            if not normalized_lookup:
+                continue
+            name_index.setdefault(normalized_lookup, set()).add(node_id)
+            file_name_index.setdefault((resolved_file, normalized_lookup), set()).add(node_id)
 
-    edges: list[dict[str, str]] = []
-    seen_edges: set[tuple[str, str]] = set()
+    edges: list[dict[str, Any]] = []
+    seen_edges: set[tuple[str, str, str]] = set()
 
     for node in nodes:
+        resolved_file = str(Path(node.get("file") or "").resolve())
+        caller_key = (resolved_file, str(node.get("name") or ""))
+        alias_map = (call_aliases or {}).get(caller_key, {})
         for call_name in infer_call_names(node.get("source_code", "")):
-            target_ids = name_index.get(call_name, set())
+            target_ids = _resolve_node_ids_for_name(
+                name_index,
+                file_name_index,
+                resolved_file,
+                call_name,
+                alias_map.get(normalize_symbol_name(call_name)),
+            )
             for target_id in target_ids:
                 if target_id == node["id"]:
                     continue
-                edge = (node["id"], target_id)
-                if edge in seen_edges:
+                edge_key = (node["id"], target_id, "call")
+                if edge_key in seen_edges:
                     continue
-                seen_edges.add(edge)
-                edges.append({"source": node["id"], "target": target_id})
+                seen_edges.add(edge_key)
+                style = edge_style("call")
+                edges.append(
+                    {
+                        "source": node["id"],
+                        "target": target_id,
+                        "type": "call",
+                        "label": style["label"],
+                        "color": style["color"],
+                    }
+                )
+
+    for explicit_edge in explicit_edges or []:
+        source_file = str(Path(explicit_edge.source_file).resolve()) if explicit_edge.source_file else ""
+        source_id = node_id_by_symbol.get((source_file, explicit_edge.source_name))
+        if not source_id:
+            continue
+
+        target_matches = resolve_module_target_names(
+            build_module_index(extracted_nodes),
+            explicit_edge.target_file,
+            explicit_edge.target_name,
+        )
+        if not target_matches and explicit_edge.target_file:
+            target_matches = [(str(Path(explicit_edge.target_file).resolve()), explicit_edge.target_name)]
+
+        for target_file, target_name in target_matches:
+            target_ids = file_name_index.get((str(Path(target_file).resolve()), normalize_symbol_name(target_name)), set())
+            if not target_ids:
+                target_ids = name_index.get(normalize_symbol_name(target_name), set())
+            for target_id in target_ids:
+                if target_id == source_id:
+                    continue
+                edge_key = (source_id, target_id, explicit_edge.edge_type)
+                if edge_key in seen_edges:
+                    continue
+                seen_edges.add(edge_key)
+                style = edge_style(explicit_edge.edge_type)
+                edges.append(
+                    {
+                        "source": source_id,
+                        "target": target_id,
+                        "type": explicit_edge.edge_type,
+                        "label": style["label"],
+                        "color": style["color"],
+                    }
+                )
+
+    edge_breakdown: dict[str, int] = {}
+    for edge in edges:
+        edge_type = str(edge.get("type") or "call")
+        edge_breakdown[edge_type] = edge_breakdown.get(edge_type, 0) + 1
 
     return {
         "nodes": nodes,
@@ -215,6 +373,7 @@ def build_graph_from_nodes(
             "plugin_label": label,
             "mode": "static",
             "root_path": str(Path(root_path).resolve()),
+            "edge_breakdown": edge_breakdown,
         },
     }
 
@@ -258,6 +417,7 @@ def build_stub_graph(
             "language": language,
             "plugin_label": label,
             "mode": "stub",
+            "edge_breakdown": {},
         },
     }
 

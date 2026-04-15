@@ -401,6 +401,40 @@ function getMutationBadgeHTML(status) {
   return `<span class="mutation-badge" style="background:${badge.background};color:${badge.color};">${badge.label}</span>`;
 }
 
+function renderProjectInsights(insights) {
+  const container = document.getElementById("project-insights");
+  if (!container) {
+    return;
+  }
+
+  if (!insights || typeof insights !== "object" || !Object.keys(insights).length) {
+    container.textContent = "Scan a project to load architecture insights.";
+    return;
+  }
+
+  const summary = insights.summary || "Architecture insights loaded.";
+  const fanIn = Array.isArray(insights.fan_in) ? insights.fan_in.slice(0, 3) : [];
+  const fanOut = Array.isArray(insights.fan_out) ? insights.fan_out.slice(0, 3) : [];
+  const coupling = Array.isArray(insights.tight_coupling) ? insights.tight_coupling.slice(0, 2) : [];
+  const deadCode = Array.isArray(insights.dead_code_candidates) ? insights.dead_code_candidates.slice(0, 3) : [];
+
+  const lines = [`<div>${summary}</div>`];
+  if (fanIn.length) {
+    lines.push(`<div><strong>High fan-in:</strong> ${fanIn.map((item) => `${item.name} (${item.score})`).join(", ")}</div>`);
+  }
+  if (fanOut.length) {
+    lines.push(`<div><strong>High fan-out:</strong> ${fanOut.map((item) => `${item.name} (${item.score})`).join(", ")}</div>`);
+  }
+  if (coupling.length) {
+    lines.push(`<div><strong>Tight coupling:</strong> ${coupling.map((item) => `${item.left} ↔ ${item.right}`).join(", ")}</div>`);
+  }
+  if (deadCode.length) {
+    lines.push(`<div><strong>Dead-code candidates:</strong> ${deadCode.map((item) => item.name).join(", ")}</div>`);
+  }
+
+  container.innerHTML = lines.join("");
+}
+
 async function loadNodeDetail(node, graphData) {
   try {
     if (window.highlightNode) {
@@ -528,9 +562,11 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("panel-close-btn")?.addEventListener("click", hidePanel);
   bindDetailPanelActions();
   initializeChatUi();
+  renderProjectInsights(window.__CODEWEAVE_INSIGHTS__ || null);
 });
 
 window.loadNodeDetail = loadNodeDetail;
 window.showBlastInfo = showBlastInfo;
 window.hidePanel = hidePanel;
 window.getMutationBadgeHTML = getMutationBadgeHTML;
+window.renderProjectInsights = renderProjectInsights;

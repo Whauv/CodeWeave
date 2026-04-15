@@ -6,6 +6,7 @@ import logging
 import shutil
 import subprocess
 import tarfile
+import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
