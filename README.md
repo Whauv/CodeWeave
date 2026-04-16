@@ -226,7 +226,7 @@ Shows the graph populated with a scanned project, the selected node summary, sav
 
 ### Evolution Mode
 
-Add a future screenshot here when the time-travel timeline view is finalized.
+![Selected node workflow](assets/screenshots/Codemapper-Evolution.png)
 
 ## License
 
