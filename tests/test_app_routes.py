@@ -37,6 +37,11 @@ class AppRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.get_json()["error"], "No graph scanned yet")
 
+    def test_insights_endpoint_requires_prior_scan(self) -> None:
+        response = self.client.get("/api/insights")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.get_json()["error"], "No graph scanned yet")
+
     def test_history_endpoint_requires_prior_scan(self) -> None:
         response = self.client.get("/api/history")
         self.assertEqual(response.status_code, 404)

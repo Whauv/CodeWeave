@@ -178,6 +178,34 @@
       align-items: center;
     }
 
+    .history-stepper {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .history-speed-shell {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 0 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .history-speed-shell select {
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+      cursor: pointer;
+    }
+
     .history-scrub-row {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr) auto;
@@ -197,6 +225,74 @@
       border-radius: 18px;
       border: 1px solid var(--border);
       background: rgba(255, 255, 255, 0.03);
+    }
+
+    .history-diff-card {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.03);
+      max-height: 220px;
+      overflow: auto;
+    }
+
+    .history-diff-summary,
+    .history-diff-empty,
+    .history-diff-more {
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.4;
+    }
+
+    .history-diff-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 6px;
+    }
+
+    .history-diff-list li {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 0.83rem;
+      color: var(--text);
+      min-width: 0;
+    }
+
+    .history-diff-status {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--accent-soft);
+      font-size: 0.73rem;
+      flex: 0 0 auto;
+    }
+
+    .history-diff-old {
+      color: var(--muted);
+      text-decoration: line-through;
+      font-size: 0.8rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 42%;
+    }
+
+    .history-diff-path {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+      flex: 1;
     }
 
     .history-commit-line {
@@ -842,6 +938,23 @@
       background: rgba(255, 140, 66, 0.16);
       border-color: rgba(255, 140, 66, 0.45);
       color: var(--accent-soft);
+    }
+
+    #history-play-btn.active {
+      background: linear-gradient(135deg, rgba(255, 140, 66, 0.36), rgba(102, 215, 209, 0.22));
+      border-color: rgba(255, 200, 91, 0.64);
+      color: #fff2d2;
+      animation: historyPulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes historyPulse {
+      0%,
+      100% {
+        box-shadow: 0 0 0 0 rgba(255, 140, 66, 0.34);
+      }
+      50% {
+        box-shadow: 0 0 0 8px rgba(255, 140, 66, 0.08);
+      }
     }
 
     #graph-container {
@@ -1673,6 +1786,7 @@
             <button id="cluster-toggle-btn" class="ghost-btn active">Cluster View</button>
             <button id="history-btn" class="ghost-btn">Evolution</button>
             <button id="theme-toggle-btn" class="ghost-btn">Light Theme</button>
+            <button id="stop-build-btn" class="ghost-btn">Stop Build</button>
             <button id="graph-load-more-btn" class="ghost-btn">Load More</button>
             <button id="graph-show-all-btn" class="ghost-btn">Show All</button>
             <button id="export-svg-btn" class="ghost-btn">Export SVG</button>
@@ -1745,6 +1859,19 @@
                 <div class="history-topbar">
                   <button id="history-play-btn" class="ghost-btn">Play Timeline</button>
                   <button id="history-live-btn" class="ghost-btn">Back To Live Graph</button>
+                  <div class="history-stepper">
+                    <button id="history-prev-btn" class="ghost-btn">Prev Commit</button>
+                    <button id="history-next-btn" class="ghost-btn">Next Commit</button>
+                    <button id="history-diff-btn" class="ghost-btn">Show Diff</button>
+                  </div>
+                  <label class="history-speed-shell" for="history-speed-select">
+                    <span>Playback</span>
+                    <select id="history-speed-select">
+                      <option value="3500">Faster</option>
+                      <option value="7000" selected>Slower</option>
+                      <option value="12000">Slowest</option>
+                    </select>
+                  </label>
                   <div id="history-status" class="history-badge">Load a scanned git repo to begin.</div>
                 </div>
                 <div class="history-scrub-row">
@@ -1755,6 +1882,9 @@
                 <div class="history-commit-card">
                   <div id="history-commit-title" class="history-commit-title">No timeline loaded yet.</div>
                   <div id="history-commit-meta" class="history-commit-line"></div>
+                </div>
+                <div id="history-diff-body" class="history-diff-card">
+                  <div class="history-diff-empty">Click `Show Diff` to compare the current commit with the previous commit.</div>
                 </div>
               </div>
             </div>
@@ -1781,6 +1911,11 @@
           <div class="panel-card">
             <div class="panel-label">Summary</div>
             <div id="node-summary">Node details will appear here.</div>
+          </div>
+
+          <div class="panel-card">
+            <div class="panel-label">Project insights</div>
+            <div id="project-insights" class="list-wrap">Scan a project to load architecture insights.</div>
           </div>
 
           <div class="panel-card">

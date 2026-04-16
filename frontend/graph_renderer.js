@@ -11,6 +11,7 @@
     function applyTreeLayout(nodes, links, width, height) {
       const incoming = new Map(nodes.map((node) => [node.id, []]));
       const outgoing = new Map(nodes.map((node) => [node.id, []]));
+      const nodeById = new Map(nodes.map((node) => [node.id, node]));
       links.forEach((link) => {
         incoming.get(link.target.id)?.push(link.source.id);
         outgoing.get(link.source.id)?.push(link.target.id);
@@ -60,24 +61,107 @@
       const bottom = 90;
       const xStep = ordered.length > 1 ? (width - left - right) / (ordered.length - 1) : 0;
 
-      ordered.forEach((depth) => {
-        const layer = layers.get(depth).sort(
-          (a, b) =>
-            ((b.outgoingCount || 0) + (b.incomingCount || 0)) -
-              ((a.outgoingCount || 0) + (a.incomingCount || 0)) ||
+      const orderIndex = new Map();
+      ordered.forEach((depth, depthIndex) => {
+        const rawLayer = layers.get(depth) || [];
+        const previousDepth = ordered[depthIndex - 1];
+        const previousOrder = orderIndex.get(previousDepth) || new Map();
+
+        const layer = rawLayer.slice().sort((a, b) => {
+          const incomingA = incoming.get(a.id) || [];
+          const incomingB = incoming.get(b.id) || [];
+          const barycenterA = incomingA.length
+            ? incomingA.reduce((sum, id) => sum + (previousOrder.get(id) ?? 0), 0) / incomingA.length
+            : Number.MAX_SAFE_INTEGER;
+          const barycenterB = incomingB.length
+            ? incomingB.reduce((sum, id) => sum + (previousOrder.get(id) ?? 0), 0) / incomingB.length
+            : Number.MAX_SAFE_INTEGER;
+          const clusterA = String(a.clusterKey || a.file || a.name);
+          const clusterB = String(b.clusterKey || b.file || b.name);
+          return (
+            barycenterA - barycenterB ||
+            clusterA.localeCompare(clusterB) ||
+            (((b.outgoingCount || 0) + (b.incomingCount || 0)) -
+              ((a.outgoingCount || 0) + (a.incomingCount || 0))) ||
             a.name.localeCompare(b.name)
-        );
-        const yStep = layer.length > 1 ? (height - top - bottom) / (layer.length - 1) : 0;
-        layer.forEach((node, index) => {
-          node.x = left + depth * xStep;
-          node.y = layer.length === 1 ? height / 2 : top + index * yStep;
+          );
         });
+
+        const layerOrder = new Map();
+        layer.forEach((node, index) => layerOrder.set(node.id, index));
+        orderIndex.set(depth, layerOrder);
+
+        const grouped = [];
+        let currentGroup = null;
+        layer.forEach((node) => {
+          const groupKey = String(node.clusterKey || node.file || node.name);
+          if (!currentGroup || currentGroup.key !== groupKey) {
+            currentGroup = { key: groupKey, nodes: [] };
+            grouped.push(currentGroup);
+          }
+          currentGroup.nodes.push(node);
+        });
+
+        const intraNodeGap = Math.max(16, Math.min(34, (height - top - bottom) / Math.max(layer.length + grouped.length, 8)));
+        const interGroupGap = Math.max(10, Math.min(28, intraNodeGap * 0.85));
+        const totalHeight =
+          grouped.reduce((sum, group) => sum + group.nodes.length * intraNodeGap, 0) +
+          Math.max(0, grouped.length - 1) * interGroupGap;
+        let cursorY = Math.max(top, (height - totalHeight) / 2);
+
+        grouped.forEach((group) => {
+          group.nodes.forEach((node) => {
+            node.x = left + depth * xStep;
+            node.y = cursorY;
+            cursorY += intraNodeGap;
+          });
+          cursorY += interGroupGap;
+        });
+      });
+
+      nodes.forEach((node) => {
+        node.x = Math.max(left, Math.min(width - right, node.x || width / 2));
+        node.y = Math.max(top, Math.min(height - bottom, node.y || height / 2));
       });
     }
 
     function treePath(link) {
       const midX = (link.source.x + link.target.x) / 2;
       return `M${link.source.x},${link.source.y} C${midX},${link.source.y} ${midX},${link.target.y} ${link.target.x},${link.target.y}`;
+    }
+
+    function getDeclutteredTreeLinks(nodes, links) {
+      if (!nodes.length || nodes.length <= 90) {
+        return links;
+      }
+      const maxIncomingPerTarget = nodes.length > 260 ? 2 : nodes.length > 160 ? 3 : 4;
+      const incomingByTarget = new Map();
+      links.forEach((link) => {
+        const targetId = link.target.id;
+        if (!incomingByTarget.has(targetId)) {
+          incomingByTarget.set(targetId, []);
+        }
+        incomingByTarget.get(targetId).push(link);
+      });
+
+      const kept = [];
+      incomingByTarget.forEach((incomingLinks) => {
+        incomingLinks
+          .sort((left, right) => {
+            const rightWeight =
+              (right.weight || 1) +
+              (right.source.outgoingCount || 0) * 0.08 +
+              (right.source.incomingCount || 0) * 0.04;
+            const leftWeight =
+              (left.weight || 1) +
+              (left.source.outgoingCount || 0) * 0.08 +
+              (left.source.incomingCount || 0) * 0.04;
+            return rightWeight - leftWeight;
+          })
+          .slice(0, maxIncomingPerTarget)
+          .forEach((link) => kept.push(link));
+      });
+      return kept;
     }
 
     function buildSvgShell(svg, currentZoomTransform, onZoomStart, onZoom, onZoomEnd) {
@@ -112,13 +196,30 @@
 
     function renderTreeGraph(data, width, height, layers, bindNodeInteractions) {
       const { nodes, links } = getGraphCollections(data);
+      const renderLinks = getDeclutteredTreeLinks(nodes, links);
       const palette = getGraphPalette();
-      applyTreeLayout(nodes, links, width, height);
+      applyTreeLayout(nodes, renderLinks, width, height);
+
+      const linkTransition = d3.transition().duration(420).ease(d3.easeCubicOut);
+      const nodeTransition = d3.transition().duration(520).ease(d3.easeBackOut.overshoot(1.15));
 
       const linkSelection = layers.linkLayer
         .selectAll("path")
-        .data(links, (link) => `${link.source.id}-${link.target.id}`)
-        .join("path")
+        .data(renderLinks, (link) => `${link.source.id}-${link.target.id}`)
+        .join(
+          (enter) =>
+            enter
+              .append("path")
+              .attr("fill", "none")
+              .attr("stroke", palette.linkTree)
+              .attr("stroke-width", (link) => Math.min(3, 1.1 + (link.weight || 1) * 0.2))
+              .attr("marker-end", "url(#arrowhead)")
+              .attr("d", (link) => treePath(link))
+              .style("opacity", 0)
+              .call((selection) => selection.transition(linkTransition).style("opacity", 1)),
+          (update) => update,
+          (exit) => exit.transition(linkTransition).style("opacity", 0).remove()
+        )
         .attr("d", (link) => treePath(link))
         .attr("fill", "none")
         .attr("stroke", palette.linkTree)
@@ -128,7 +229,32 @@
       const nodeSelection = layers.nodeLayer
         .selectAll("circle")
         .data(nodes, (node) => node.id)
-        .join("circle")
+        .join(
+          (enter) =>
+            enter
+              .append("circle")
+              .attr("cx", (node) => node.x)
+              .attr("cy", (node) => node.y)
+              .attr("r", 0)
+              .attr("fill", (node) => getNodeFill(node))
+              .attr("stroke", palette.nodeStroke)
+              .attr("stroke-width", 2)
+              .attr("data-node-id", (node) => node.id)
+              .style("opacity", 0)
+              .call((selection) =>
+                selection
+                  .transition(nodeTransition)
+                  .attr("r", (node) => getNodeRadius(node))
+                  .style("opacity", 1)
+              ),
+          (update) => update,
+          (exit) =>
+            exit
+              .transition(linkTransition)
+              .attr("r", 0)
+              .style("opacity", 0)
+              .remove()
+        )
         .attr("cx", (node) => node.x)
         .attr("cy", (node) => node.y)
         .attr("r", (node) => getNodeRadius(node))
@@ -141,7 +267,15 @@
       const labelSelection = layers.labelLayer
         .selectAll("text")
         .data(nodes, (node) => node.id)
-        .join("text")
+        .join(
+          (enter) =>
+            enter
+              .append("text")
+              .style("opacity", 0)
+              .call((selection) => selection.transition(linkTransition).style("opacity", 1)),
+          (update) => update,
+          (exit) => exit.transition(linkTransition).style("opacity", 0).remove()
+        )
         .text((node) => node.isCluster ? `${truncateLabel(node.name)} (${node.memberCount})` : truncateLabel(node.name))
         .attr("x", (node) => node.x + getNodeRadius(node) + 10)
         .attr("y", (node) => node.y + 4)
@@ -157,6 +291,8 @@
     function renderForceGraph(data, width, height, layers, bindNodeInteractions, dragHandlers) {
       const { nodes, links } = getGraphCollections(data);
       const palette = getGraphPalette();
+      const linkTransition = d3.transition().duration(320).ease(d3.easeCubicOut);
+      const nodeTransition = d3.transition().duration(420).ease(d3.easeBackOut.overshoot(1.1));
       const simulation = d3
         .forceSimulation(nodes)
         .force("link", d3.forceLink(links).id((node) => node.id).distance((link) => link.source.isCluster || link.target.isCluster ? 160 : 120))
@@ -169,7 +305,15 @@
       const linkSelection = layers.linkLayer
         .selectAll("line")
         .data(links, (link) => `${link.source.id}-${link.target.id}`)
-        .join("line")
+        .join(
+          (enter) =>
+            enter
+              .append("line")
+              .style("opacity", 0)
+              .call((selection) => selection.transition(linkTransition).style("opacity", 1)),
+          (update) => update,
+          (exit) => exit.transition(linkTransition).style("opacity", 0).remove()
+        )
         .attr("stroke", palette.linkForce)
         .attr("stroke-width", (link) => Math.min(3, 1 + (link.weight || 1) * 0.16))
         .attr("marker-end", "url(#arrowhead)");
@@ -177,7 +321,26 @@
       const nodeSelection = layers.nodeLayer
         .selectAll("circle")
         .data(nodes, (node) => node.id)
-        .join("circle")
+        .join(
+          (enter) =>
+            enter
+              .append("circle")
+              .attr("r", 0)
+              .style("opacity", 0)
+              .call((selection) =>
+                selection
+                  .transition(nodeTransition)
+                  .attr("r", (node) => getNodeRadius(node))
+                  .style("opacity", 1)
+              ),
+          (update) => update,
+          (exit) =>
+            exit
+              .transition(linkTransition)
+              .attr("r", 0)
+              .style("opacity", 0)
+              .remove()
+        )
         .attr("r", (node) => getNodeRadius(node))
         .attr("fill", (node) => getNodeFill(node))
         .attr("stroke", palette.nodeStroke)
@@ -189,7 +352,15 @@
       const labelSelection = layers.labelLayer
         .selectAll("text")
         .data(nodes, (node) => node.id)
-        .join("text")
+        .join(
+          (enter) =>
+            enter
+              .append("text")
+              .style("opacity", 0)
+              .call((selection) => selection.transition(linkTransition).style("opacity", 1)),
+          (update) => update,
+          (exit) => exit.transition(linkTransition).style("opacity", 0).remove()
+        )
         .text((node) => node.isCluster ? `${truncateLabel(node.name)} (${node.memberCount})` : truncateLabel(node.name))
         .attr("fill", palette.label)
         .attr("font-size", (node) => node.isCluster ? 12.5 : 12)

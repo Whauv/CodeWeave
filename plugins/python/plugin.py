@@ -4,6 +4,7 @@ from typing import Any
 
 from git_tracker import mutation_tracker
 from graph import graph_builder
+from graph.insights import compute_insights
 from plugins.base import BaseLanguagePlugin
 
 
@@ -27,6 +28,7 @@ class PythonLanguagePlugin(BaseLanguagePlugin):
             "plugin_label": self.label,
             "mode": "full" if include_summaries else "lightweight",
         }
+        graph_data["insights"] = compute_insights(graph_data)
         return graph_data
 
 

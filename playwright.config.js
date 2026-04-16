@@ -17,6 +17,10 @@ function resolvePythonCommand() {
 const config = {
   testDir: "./smoke",
   timeout: 60000,
+  // The Flask test server holds scan state in process memory.
+  // Keep CI smoke tests single-worker to avoid cross-test state races.
+  workers: process.env.CI ? 1 : undefined,
+  fullyParallel: false,
   use: {
     baseURL: process.env.CODEWEAVE_BASE_URL || "http://127.0.0.1:5050",
     headless: true,

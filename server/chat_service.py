@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections import Counter
 from typing import Any
 
@@ -10,6 +11,9 @@ except Exception:
     Groq = None
 
 from graph import blast_radius
+
+CHAT_RATE_LIMIT_UNTIL = 0.0
+CHAT_RATE_LIMIT_COOLDOWN_SECONDS = 30
 
 
 def _get_node_from_graph(graph_data: dict[str, Any] | None, node_id: str) -> dict[str, Any] | None:
@@ -96,6 +100,56 @@ def collect_hotspots(nodes: list[dict[str, Any]]) -> list[str]:
     return hotspot_nodes[:8]
 
 
+def build_evidence_items(
+    graph_data: dict[str, Any] | None,
+    selected_node: dict[str, Any] | None,
+    callers: list[str] | None = None,
+    callees: list[str] | None = None,
+) -> list[str]:
+    if graph_data is None:
+        return []
+
+    insights = graph_data.get("insights") or {}
+    evidence: list[str] = []
+    evidence_id = 1
+
+    for coupling in insights.get("tight_coupling", [])[:3]:
+        evidence.append(
+            f"[E{evidence_id}] Tight coupling: {coupling.get('left')} <-> {coupling.get('right')} ({coupling.get('edges')} edges)"
+        )
+        evidence_id += 1
+
+    for node in insights.get("fan_in", [])[:2]:
+        evidence.append(
+            f"[E{evidence_id}] High fan-in node: {node.get('name')} in {format_file_label(node.get('file') or '')} ({node.get('score')} inbound edges)"
+        )
+        evidence_id += 1
+
+    if selected_node is not None:
+        evidence.append(
+            f"[E{evidence_id}] Selected node: {selected_node.get('name')} at {selected_node.get('file')}:{selected_node.get('line')}"
+        )
+        evidence_id += 1
+        evidence.append(
+            f"[E{evidence_id}] Selected summary: {selected_node.get('summary') or 'No summary available.'}"
+        )
+        evidence_id += 1
+        if callers:
+            evidence.append(f"[E{evidence_id}] Callers: {safe_join_names(callers)}")
+            evidence_id += 1
+        if callees:
+            evidence.append(f"[E{evidence_id}] Callees: {safe_join_names(callees)}")
+            evidence_id += 1
+
+    for candidate in insights.get("dead_code_candidates", [])[:3]:
+        evidence.append(
+            f"[E{evidence_id}] Dead-code candidate: {candidate.get('name')} in {format_file_label(candidate.get('file') or '')}"
+        )
+        evidence_id += 1
+
+    return evidence
+
+
 def collect_feature_candidates(
     selected_node: dict[str, Any] | None,
     nodes_by_id: dict[str, dict[str, Any]],
@@ -133,11 +187,14 @@ def build_project_context(graph_data: dict[str, Any] | None) -> str:
     coupled_modules = collect_module_coupling(nodes_by_id, edge_pairs)
     top_modules = collect_top_modules(nodes)
     hotspots = collect_hotspots(nodes)
+    insights = graph_data.get("insights") or {}
+    edge_breakdown = insights.get("edge_type_breakdown") or graph_data.get("meta", {}).get("edge_breakdown", {})
 
     lines = [
         f"Project stats: {len(nodes)} nodes, {len(edges)} edges.",
         f"Most populated modules: {safe_join_names([f'{name} ({count})' for name, count in top_modules], limit=6)}",
         f"Hotspot nodes: {safe_join_names(hotspots, limit=6)}",
+        f"Edge types: {safe_join_names([f'{edge_type} ({count})' for edge_type, count in edge_breakdown.items()], limit=6)}",
     ]
 
     if coupled_modules:
@@ -150,6 +207,10 @@ def build_project_context(graph_data: dict[str, Any] | None) -> str:
         )
     else:
         lines.append("Most tightly coupled modules: None identified yet.")
+    dead_code = insights.get("dead_code_candidates") or []
+    lines.append(
+        f"Dead-code candidates: {safe_join_names([item.get('name') or 'unknown' for item in dead_code], limit=6)}"
+    )
     return "\n".join(lines)
 
 
@@ -171,6 +232,10 @@ def build_chat_context(graph_data: dict[str, Any] | None, node_id: str | None) -
         lines.append(
             f"Good candidate modules for new features: {safe_join_names(feature_candidates, limit=5)}"
         )
+        evidence_items = build_evidence_items(graph_data, None)
+        if evidence_items:
+            lines.append("Evidence:")
+            lines.extend(evidence_items)
         return "\n".join(lines)
 
     node = _get_node_from_graph(graph_data, node_id)
@@ -214,6 +279,10 @@ def build_chat_context(graph_data: dict[str, Any] | None, node_id: str | None) -
             f"- recommended feature placement modules: {safe_join_names(feature_candidates, limit=5)}",
         ]
     )
+    evidence_items = build_evidence_items(graph_data, node, callers, callees)
+    if evidence_items:
+        lines.append("Evidence:")
+        lines.extend(evidence_items)
     return "\n".join(lines)
 
 
@@ -232,7 +301,8 @@ def build_chat_messages(
         "When asked what breaks if code changes, use callers, callees, and blast radius. "
         "When asked where to add a feature, recommend likely modules or nodes and explain why. "
         "When asked which modules are tightly coupled, rely on module coupling data from the context. "
-        "Prefer short bullet points or short paragraphs with evidence."
+        "Prefer short bullet points or short paragraphs with evidence. "
+        "Whenever you make a specific claim, cite one or more evidence ids like [E1] or [E2]."
     )
 
     messages: list[dict[str, str]] = [
@@ -249,17 +319,28 @@ def build_chat_messages(
 
 
 def chat_with_groq(messages: list[dict[str, str]], model: str) -> str:
+    global CHAT_RATE_LIMIT_UNTIL
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key or Groq is None:
         raise ValueError("Missing GROQ_API_KEY for chat")
+    if CHAT_RATE_LIMIT_UNTIL > time.time():
+        wait_seconds = max(1, int(CHAT_RATE_LIMIT_UNTIL - time.time()))
+        raise ValueError(f"Groq is rate limited right now. Try again in about {wait_seconds}s.")
 
-    client = Groq(api_key=api_key)
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0.2,
-        max_tokens=500,
-    )
+    client = Groq(api_key=api_key, max_retries=0)
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.2,
+            max_tokens=500,
+        )
+    except Exception as exc:
+        message = str(exc).lower()
+        if "429" in message or "rate limit" in message or "too many requests" in message:
+            CHAT_RATE_LIMIT_UNTIL = time.time() + CHAT_RATE_LIMIT_COOLDOWN_SECONDS
+            raise ValueError("Groq is rate limited right now. Try again in about 30s.") from exc
+        raise
     if not response.choices:
         return "No response generated."
     return (response.choices[0].message.content or "No response generated.").strip()

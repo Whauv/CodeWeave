@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -21,6 +22,8 @@ MODEL_NAME = "llama-3.1-8b-instant"
 MAX_BATCH_SIZE = 4
 MAX_SOURCE_CHARS = 1600
 MAX_BATCH_TOKENS = 220
+RATE_LIMIT_COOLDOWN_SECONDS = 45
+SUMMARY_RATE_LIMIT_UNTIL = 0.0
 
 
 def get_node_id(file_path: str, function_name: str) -> str:
@@ -47,10 +50,13 @@ def _save_cache(cache: dict[str, str]) -> None:
 
 
 def _get_client() -> Groq | None:
+    global SUMMARY_RATE_LIMIT_UNTIL
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key or Groq is None:
         return None
-    return Groq(api_key=api_key)
+    if SUMMARY_RATE_LIMIT_UNTIL > time.time():
+        return None
+    return Groq(api_key=api_key, max_retries=0)
 
 
 def _trim_source(source_code: str) -> str:
@@ -81,6 +87,7 @@ def _store_no_summary(cache: dict[str, str], nodes: list[dict[str, str]]) -> Non
 
 
 def _summarize_batch(client: Groq, cache: dict[str, str], batch: list[dict[str, str]]) -> bool:
+    global SUMMARY_RATE_LIMIT_UNTIL
     prompt_lines = [
         "Summarize each Python function below in one concise sentence of at most 20 words.",
         "Return valid JSON only as an object mapping each id to its summary.",
@@ -120,6 +127,7 @@ def _summarize_batch(client: Groq, cache: dict[str, str], batch: list[dict[str, 
 
         _store_no_summary(cache, batch)
         if _is_rate_limit_error(exc):
+            SUMMARY_RATE_LIMIT_UNTIL = time.time() + RATE_LIMIT_COOLDOWN_SECONDS
             LOGGER.warning("Groq rate limit hit; disabling remote summaries for the rest of this scan.")
             return False
         if _is_json_generation_error(exc):
@@ -151,6 +159,7 @@ def summarize_nodes(nodes: list[dict[str, str]]) -> dict[str, str]:
 
 
 def summarize_node(source_code: str, node_id: str) -> str:
+    global SUMMARY_RATE_LIMIT_UNTIL
     cache = _load_cache()
     if node_id in cache:
         return cache[node_id]
@@ -178,6 +187,8 @@ def summarize_node(source_code: str, node_id: str) -> str:
         _save_cache(cache)
         return summary
     except Exception as exc:
+        if _is_rate_limit_error(exc):
+            SUMMARY_RATE_LIMIT_UNTIL = time.time() + RATE_LIMIT_COOLDOWN_SECONDS
         LOGGER.error("Groq summarization failed for %s: %s", node_id, exc)
         return "No summary available."
 

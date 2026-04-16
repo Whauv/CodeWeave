@@ -28,6 +28,7 @@ from graph import blast_radius
 from plugins import get_language_options, get_plugin
 from server.chat_service import chat_with_provider
 from server.repository_service import (
+    diff_commits,
     ensure_cached_repo,
     extract_commit_snapshot,
     is_git_repo,
@@ -40,6 +41,10 @@ from server.state import STATE
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("groq").setLevel(logging.WARNING)
+logging.getLogger("groq._base_client").setLevel(logging.ERROR)
 
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
@@ -99,6 +104,17 @@ def get_graph() -> Any:
         return jsonify(STATE.graph_cache)
     except Exception as exc:
         LOGGER.exception("Graph fetch failed: %s", exc)
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.get("/api/insights")
+def get_insights() -> Any:
+    try:
+        if STATE.graph_cache is None:
+            return jsonify({"error": "No graph scanned yet"}), 404
+        return jsonify(STATE.graph_cache.get("insights", {}))
+    except Exception as exc:
+        LOGGER.exception("Insights fetch failed: %s", exc)
         return jsonify({"error": str(exc)}), 400
 
 
@@ -215,6 +231,28 @@ def get_history_graph(commit_hash: str) -> Any:
     finally:
         if snapshot_root is not None:
             shutil.rmtree(snapshot_root.parent, ignore_errors=True)
+
+
+@app.get("/api/history-diff/<from_commit>/<to_commit>")
+def get_history_diff(from_commit: str, to_commit: str) -> Any:
+    try:
+        if STATE.scan_context is None:
+            return jsonify({"error": "No graph scanned yet"}), 404
+
+        repo_root = Path(str(STATE.scan_context.get("scan_root") or "")).resolve()
+        if not is_git_repo(repo_root):
+            return jsonify({"error": "Time-travel diff requires a git repository."}), 400
+
+        diff_data = diff_commits(repo_root, from_commit, to_commit)
+        return jsonify(diff_data)
+    except Exception as exc:
+        LOGGER.exception("History diff fetch failed: %s", exc)
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.get("/api/history/diff/<from_commit>/<to_commit>")
+def get_history_diff_legacy(from_commit: str, to_commit: str) -> Any:
+    return get_history_diff(from_commit, to_commit)
 
 
 @app.get("/")

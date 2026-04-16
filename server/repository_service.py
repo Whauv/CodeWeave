@@ -6,6 +6,7 @@ import logging
 import shutil
 import subprocess
 import tarfile
+import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -252,6 +253,53 @@ def list_repo_commits(repo_root: Path, limit: int = 40) -> tuple[list[dict[str, 
     history_meta["returned_count"] = len(commits)
     history_meta["branch_names"] = list_remote_branch_names(repo_root)
     return commits, history_meta
+
+
+def diff_commits(
+    repo_root: Path,
+    from_commit: str,
+    to_commit: str,
+    max_files: int = 80,
+) -> dict[str, Any]:
+    if not is_git_repo(repo_root):
+        raise ValueError("Diff requires a git repository.")
+
+    stat_result = run_git_command(
+        repo_root,
+        ["diff", "--shortstat", from_commit, to_commit],
+        timeout=120,
+    )
+    if stat_result.returncode != 0:
+        raise ValueError(stat_result.stderr.strip() or "Failed to compute commit diff summary")
+
+    files_result = run_git_command(
+        repo_root,
+        ["diff", "--name-status", from_commit, to_commit],
+        timeout=120,
+    )
+    if files_result.returncode != 0:
+        raise ValueError(files_result.stderr.strip() or "Failed to compute commit diff files")
+
+    changed_files: list[dict[str, str]] = []
+    for line in (files_result.stdout or "").splitlines():
+        parts = line.strip().split("\t")
+        if not parts:
+            continue
+        status = parts[0].strip() or "M"
+        if status.startswith("R") and len(parts) >= 3:
+            changed_files.append({"status": "R", "old_path": parts[1], "path": parts[2]})
+        elif len(parts) >= 2:
+            changed_files.append({"status": status[0], "path": parts[1]})
+        if len(changed_files) >= max_files:
+            break
+
+    return {
+        "from_commit": from_commit,
+        "to_commit": to_commit,
+        "shortstat": (stat_result.stdout or "").strip() or "No file-level changes detected.",
+        "changed_files": changed_files,
+        "truncated": len(changed_files) >= max_files,
+    }
 
 
 def _safe_extract_tar(tar_file: tarfile.TarFile, destination: Path) -> None:
