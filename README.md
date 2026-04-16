@@ -237,6 +237,10 @@ Shows the graph populated with a scanned project, the selected node summary, sav
 
 Shows commit playback controls, timeline navigation, and commit diff intelligence from the Evolution panel.
 
+![Evolution playback view](assets/screenshots/Codemapper-Evolution.png)
+
+Shows the evolution overlay in playback mode with commit transitions.
+
 ### Action Plan Panel
 
 ![Action plan generation panel](assets/screenshots/action-plan-panel.png)

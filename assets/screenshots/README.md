@@ -1,6 +1,6 @@
 # Screenshot Assets
 
-Add project screenshots here using these filenames:
+Adding project screenshots here using these filenames:
 
 - `dashboard-empty.png`
 - `dashboard-node-detail.png`
