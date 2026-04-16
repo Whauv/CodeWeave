@@ -21,6 +21,8 @@ CodeWeave scans a repository, extracts code symbols, builds a dependency graph, 
 - Interactive graph exploration with D3.js, Monaco source viewing, node search, detail drill-down, and graph-aware chat
 - Tree and force layout modes for exploring the codebase from different angles
 - Evolution mode for scrubbing through git history and viewing architecture snapshots commit by commit
+- Commit diff intelligence with per-frame file status summaries and patch previews
+- Blast-to-action planning with generated rollout checklist, risk hotspots, and Markdown export
 
 ## UI Highlights
 
@@ -35,6 +37,7 @@ CodeWeave scans a repository, extracts code symbols, builds a dependency graph, 
 - Light and dark themes
 - Split view, focus modes, and draggable pane divider
 - Node detail panel with summaries, chat, mutation data, blast controls, callers, and callees
+- Context-backed chat with node-scoped references (selected node, callers, callees, and project insights)
 - Evolution overlay with timeline scrubber, commit playback, commit metadata, and a live-graph reset action
 - Export graph as SVG, PNG, or JSON
 
@@ -110,7 +113,10 @@ Evolution mode opens a separate timeline panel over the graph and lets you:
 - inspect commit-by-commit snapshots of the scanned repository
 - scrub manually across the available commit range
 - play the timeline automatically when at least two commits are available
+- step using `Prev Commit` and `Next Commit`, and monitor frame progress with counter badges
+- tune playback with `Faster`, `Slower`, and `Slowest` controls
 - jump back to the current live graph instantly
+- load per-commit diffs with `Show Diff`, including file status counts and patch preview excerpts
 
 For GitHub scans, CodeWeave now tries to pull broader branch history for the timeline instead of relying only on the initial shallow scan state.
 
@@ -209,6 +215,7 @@ The suite currently covers:
 - Flask API route behavior for common success/error paths
 - end-to-end Flask integration for scan, graph, node, history, and history-snapshot flows under the project virtualenv
 - browser smoke checks for the dashboard shell and core graph controls via Playwright
+- evolution timeline playback toggles, commit navigation, and diff loading smoke checks
 
 ## Screenshots
 
@@ -226,7 +233,19 @@ Shows the graph populated with a scanned project, the selected node summary, sav
 
 ### Evolution Mode
 
-![Selected node workflow](assets/screenshots/Codemapper-Evolution.png)
+![Evolution timeline and diff panel](assets/screenshots/evolution-timeline-diff.png)
+
+Shows commit playback controls, timeline navigation, and commit diff intelligence from the Evolution panel.
+
+![Evolution playback view](assets/screenshots/Codemapper-Evolution.png)
+
+Shows the evolution overlay in playback mode with commit transitions.
+
+### Action Plan Panel
+
+![Action plan generation panel](assets/screenshots/action-plan-panel.png)
+
+Shows node-level blast-to-action planning with impacted modules, risk hotspots, test focus, and exportable rollout checklist.
 
 ## License
 

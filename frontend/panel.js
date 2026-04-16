@@ -18,10 +18,26 @@ function getActiveDetailNode() {
   return getNodeById(nodeId, window.__CODEMAPPER_GRAPH__);
 }
 
+function getSelectedGraphNode() {
+  const selectedId =
+    window.getSelectedGraphNodeId?.() ||
+    window.__CODEWEAVE_SELECTED_NODE_ID__ ||
+    window.__CODEWEAVE_TEST_API__?.getSelectedNodeId?.();
+  if (!selectedId) {
+    return null;
+  }
+  return getNodeById(selectedId, window.__CODEMAPPER_GRAPH__);
+}
+
+function resolveActionPlanNode() {
+  return getActiveDetailNode() || getSelectedGraphNode();
+}
+
 let activeChatNodeId = null;
 let chatSessions = [];
 let activeChatSessionId = null;
 let isChatRequestInFlight = false;
+let activeActionPlan = null;
 const DEFAULT_CHAT_PROVIDER = "groq";
 const CHAT_STORAGE_KEY = "codeweave-chat-sessions-v1";
 
@@ -368,6 +384,126 @@ function initializeChatUi() {
   renderChatMessages();
 }
 
+function renderActionPlan(plan) {
+  const container = document.getElementById("action-plan-content");
+  const exportButton = document.getElementById("export-action-plan-btn");
+  if (!container) {
+    return;
+  }
+
+  if (!plan) {
+    activeActionPlan = null;
+    container.innerHTML = `<div class="muted">Select a node, then click Generate Plan to produce rollout steps and test focus.</div>`;
+    if (exportButton) {
+      exportButton.disabled = true;
+    }
+    return;
+  }
+
+  activeActionPlan = plan;
+  const hotspots = Array.isArray(plan.risk_hotspots) ? plan.risk_hotspots : [];
+  const tests = Array.isArray(plan.test_focus_areas) ? plan.test_focus_areas : [];
+  const checklist = Array.isArray(plan.staged_checklist) ? plan.staged_checklist : [];
+
+  container.innerHTML = `
+    <div><strong>${plan.summary || "Action plan generated."}</strong></div>
+    <div><span class="muted">Impacted files:</span> ${(plan.impacted_files || []).length} | <span class="muted">Modules:</span> ${(plan.impacted_modules || []).length}</div>
+    <div><strong>Risk hotspots</strong></div>
+    <ul>${hotspots.length ? hotspots.map((item) => `<li>${item.name} (${item.status}, churn ${item.churn_count})</li>`).join("") : "<li>No elevated hotspots detected.</li>"}</ul>
+    <div><strong>Test focus</strong></div>
+    <ul>${tests.length ? tests.map((item) => `<li>${item}</li>`).join("") : "<li>Add focused tests around impacted call paths.</li>"}</ul>
+    <div><strong>Checklist</strong></div>
+    <ul>${checklist.length ? checklist.map((item) => `<li>${item}</li>`).join("") : "<li>Validate changes before rollout.</li>"}</ul>
+  `;
+  if (exportButton) {
+    exportButton.disabled = !String(plan.markdown || "").trim();
+  }
+}
+
+async function generateActionPlan() {
+  const node = resolveActionPlanNode();
+  if (!node) {
+    renderActionPlan(null);
+    const container = document.getElementById("action-plan-content");
+    if (container) {
+      container.innerHTML = `<div class="muted">Select a concrete node first, then click Generate Plan.</div>`;
+    }
+    return;
+  }
+
+  const container = document.getElementById("action-plan-content");
+  if (container) {
+    container.innerHTML = `<div class="muted">Generating action plan...</div>`;
+  }
+
+  try {
+    const candidateUrls = [
+      `/api/action-plan/${node.id}`,
+      `/api/action/plan/${node.id}`,
+      `/api/action_plan/${node.id}`,
+    ];
+    let payload = null;
+    let requestError = null;
+    for (const url of candidateUrls) {
+      const response = await fetch(url);
+      const rawText = await response.text();
+      let parsed = null;
+      try {
+        parsed = rawText ? JSON.parse(rawText) : {};
+      } catch (_parseError) {
+        parsed = null;
+      }
+      if (response.ok) {
+        payload = parsed && typeof parsed === "object" ? parsed : null;
+        requestError = null;
+        break;
+      }
+      const textPreview = String(rawText || "").replace(/\s+/g, " ").trim().slice(0, 220);
+      requestError =
+        (parsed && typeof parsed === "object" && parsed.error) ||
+        textPreview ||
+        `Failed to generate action plan (${response.status})`;
+    }
+    if (!payload) {
+      throw new Error(
+        requestError ||
+        "Action plan endpoint not found. Restart server to load latest routes."
+      );
+    }
+    if (!payload || typeof payload !== "object") {
+      throw new Error("Action plan endpoint returned invalid response format.");
+    }
+    renderActionPlan(payload);
+  } catch (error) {
+    renderActionPlan(null);
+    const fallback = document.getElementById("action-plan-content");
+    if (fallback) {
+      fallback.innerHTML = `<div class="muted">Could not generate action plan: ${error.message}</div>`;
+    }
+  }
+}
+
+function exportActionPlanMarkdown() {
+  if (!activeActionPlan || !String(activeActionPlan.markdown || "").trim()) {
+    return;
+  }
+
+  const nodeName = String(activeActionPlan.node_name || "node")
+    .replace(/[^a-z0-9]+/gi, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase() || "node";
+  const filename = `action_plan_${nodeName}.md`;
+  const blob = new Blob([activeActionPlan.markdown], { type: "text/markdown;charset=utf-8" });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 function makeLinkedNodeItem(node, graphData) {
   const button = document.createElement("button");
   button.className = "linked-item";
@@ -435,26 +571,74 @@ function renderProjectInsights(insights) {
   container.innerHTML = lines.join("");
 }
 
+function ensureDetailPanelVisible() {
+  const shell = document.getElementById("detail-shell");
+  const panel = document.getElementById("detail-panel");
+  shell?.classList.remove("hidden");
+  panel?.classList.remove("hidden");
+
+  const frame = document.querySelector(".main-frame");
+  if (frame?.dataset?.view === "graph") {
+    document.getElementById("view-split-btn")?.click();
+  }
+}
+
 async function loadNodeDetail(node, graphData) {
+  if (!node) {
+    return;
+  }
   try {
     if (window.highlightNode) {
       window.highlightNode(node.id);
     }
+    ensureDetailPanelVisible();
+    setActiveDetailNodeId(node.id);
+
+    const nameEl = document.getElementById("node-name");
+    const fileEl = document.getElementById("node-file");
+    const summaryEl = document.getElementById("node-summary");
+    const badgeEl = document.getElementById("mutation-badge");
+    const churnEl = document.getElementById("churn-info");
+
+    if (nameEl) {
+      nameEl.textContent = node.name || "Unknown Node";
+    }
+    if (fileEl) {
+      fileEl.textContent = `${node.file || "unknown"}:${node.line || 0}`;
+    }
+    if (summaryEl) {
+      summaryEl.textContent = node.summary || "Loading detailed node summary...";
+    }
+    if (badgeEl) {
+      badgeEl.innerHTML = getMutationBadgeHTML(node.mutation_status);
+    }
+    if (churnEl) {
+      churnEl.textContent = `Churn: ${node.churn_count || 0} commits | Last: ${node.last_modified_commit || "N/A"}`;
+    }
+    resetChatForNode(node.id, node.name);
+    renderActionPlan(null);
+
     const response = await fetch(`/api/node/${node.id}`);
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.error || "Failed to load node details");
     }
 
-    document.getElementById("detail-panel").classList.remove("hidden");
-    document.getElementById("detail-shell").classList.remove("hidden");
-    setActiveDetailNodeId(node.id);
-    document.getElementById("node-name").textContent = data.name || "Unknown Node";
-    document.getElementById("node-file").textContent = `${data.file || "unknown"}:${data.line || 0}`;
-    document.getElementById("node-summary").textContent = data.summary || "No summary available.";
-    document.getElementById("mutation-badge").innerHTML = getMutationBadgeHTML(data.mutation_status);
-    document.getElementById("churn-info").textContent =
-      `Churn: ${data.churn_count || 0} commits | Last: ${data.last_modified_commit || "N/A"}`;
+    if (nameEl) {
+      nameEl.textContent = data.name || "Unknown Node";
+    }
+    if (fileEl) {
+      fileEl.textContent = `${data.file || "unknown"}:${data.line || 0}`;
+    }
+    if (summaryEl) {
+      summaryEl.textContent = data.summary || "No summary available.";
+    }
+    if (badgeEl) {
+      badgeEl.innerHTML = getMutationBadgeHTML(data.mutation_status);
+    }
+    if (churnEl) {
+      churnEl.textContent = `Churn: ${data.churn_count || 0} commits | Last: ${data.last_modified_commit || "N/A"}`;
+    }
     resetChatForNode(node.id, data.name || node.name);
 
     const callersContainer = document.getElementById("callers-list");
@@ -462,10 +646,11 @@ async function loadNodeDetail(node, graphData) {
     callersContainer.innerHTML = "";
     calleesContainer.innerHTML = "";
 
-    const callerIds = graphData.edges
+    const edges = Array.isArray(graphData?.edges) ? graphData.edges : [];
+    const callerIds = edges
       .filter((edge) => edge.target === node.id)
       .map((edge) => edge.source);
-    const calleeIds = graphData.edges
+    const calleeIds = edges
       .filter((edge) => edge.source === node.id)
       .map((edge) => edge.target);
 
@@ -489,6 +674,10 @@ async function loadNodeDetail(node, graphData) {
     }
   } catch (error) {
     console.error(error);
+    const summaryEl = document.getElementById("node-summary");
+    if (summaryEl) {
+      summaryEl.textContent = `Could not load full node details: ${error.message}`;
+    }
   }
 }
 
@@ -536,6 +725,7 @@ function hidePanel() {
   document.getElementById("detail-panel").classList.add("hidden");
   document.getElementById("detail-shell").classList.add("hidden");
   setActiveDetailNodeId(null);
+  renderActionPlan(null);
 }
 
 function bindDetailPanelActions() {
@@ -556,6 +746,8 @@ function bindDetailPanelActions() {
       window.openMonacoModal(node.source_code || "# No source code available");
     }
   });
+  document.getElementById("generate-action-plan-btn")?.addEventListener("click", generateActionPlan);
+  document.getElementById("export-action-plan-btn")?.addEventListener("click", exportActionPlanMarkdown);
 }
 
 document.addEventListener("DOMContentLoaded", () => {

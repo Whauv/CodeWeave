@@ -52,6 +52,47 @@ def _normalize_repo_relative_path(path_value: str | None, repo_root: Path) -> st
     return normalized.lstrip("/").replace("\\", "/")
 
 
+def _normalize_snapshot_relative_path(path_value: str | None) -> str:
+    if not path_value:
+        return ""
+    normalized = str(path_value).replace("\\", "/").lower().strip("/")
+    parts = [part for part in normalized.split("/") if part]
+    if not parts:
+        return ""
+
+    snapshot_markers = {
+        ".codeweave_tmp",
+        "history_snapshots_runtime",
+        "codeweave_repo_cache",
+        "repo",
+    }
+    for index, part in enumerate(parts):
+        if part in snapshot_markers and index < len(parts) - 1:
+            if part == "repo":
+                return "/".join(parts[index + 1 :])
+            if index + 2 < len(parts):
+                start = index + 2
+                if start < len(parts) and parts[start] == "repo":
+                    start += 1
+                return "/".join(parts[start:])
+            return "/".join(parts[index + 1 :])
+    return "/".join(parts[-4:])
+
+
+def _collect_path_variants(path_value: str | None, repo_root: Path) -> set[str]:
+    absolute = _normalize_path(path_value, repo_root)
+    repo_relative = _normalize_repo_relative_path(path_value, repo_root)
+    snapshot_relative = _normalize_snapshot_relative_path(path_value)
+    variants = {
+        absolute,
+        repo_relative,
+        snapshot_relative,
+        absolute.replace("\\", "/").lower() if absolute else "",
+        repo_relative.replace("\\", "/").lower() if repo_relative else "",
+    }
+    return {variant for variant in variants if variant}
+
+
 def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     repo_root = Path(repo_path).resolve()
     if Repository is None:
@@ -76,14 +117,13 @@ def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[st
                 if not file_path or not file_path.endswith(".py"):
                     continue
 
+                variants = _collect_path_variants(file_path, repo_root)
                 normalized_path = _normalize_path(file_path, repo_root)
                 normalized_relative = _normalize_repo_relative_path(file_path, repo_root)
                 if commit_index < 5:
-                    recent_five_files.add(normalized_path)
-                    recent_five_files.add(normalized_relative)
+                    recent_five_files.update(variants)
                 if commit_index < 30:
-                    recent_thirty_files.add(normalized_path)
-                    recent_thirty_files.add(normalized_relative)
+                    recent_thirty_files.update(variants)
                 current = file_map.setdefault(
                     normalized_path,
                     {
@@ -99,7 +139,8 @@ def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[st
                 current["added_lines"] += getattr(modified_file, "added_lines", 0) or 0
                 current["complexity"] = getattr(modified_file, "complexity", 0) or 0
                 current["last_seen_index"] = min(current.get("last_seen_index", commit_index), commit_index)
-                file_map.setdefault(normalized_relative, current)
+                for variant in variants:
+                    file_map.setdefault(variant, current)
     except Exception as exc:
         LOGGER.warning("Unable to inspect git history for %s: %s", repo_path, exc)
         return _mark_nodes_stable(nodes)
@@ -108,9 +149,12 @@ def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[st
         return _mark_nodes_stable(nodes)
 
     for node in nodes:
-        node_path = _normalize_path(node.get("file"), repo_root)
-        node_relative_path = _normalize_repo_relative_path(node.get("file"), repo_root)
-        metadata = file_map.get(node_path) or file_map.get(node_relative_path)
+        path_variants = _collect_path_variants(node.get("file"), repo_root)
+        metadata = None
+        for variant in path_variants:
+            metadata = file_map.get(variant)
+            if metadata:
+                break
         if metadata is None:
             node["mutation_status"] = "stable"
             node["mutation_color"] = "#aaaaaa"
@@ -122,10 +166,10 @@ def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[st
         if churn_count >= 5:
             mutation_status = "hotspot"
             mutation_color = "#ff4444"
-        elif node_path in recent_five_files or node_relative_path in recent_five_files:
+        elif any(variant in recent_five_files for variant in path_variants):
             mutation_status = "new"
             mutation_color = "#00ff88"
-        elif node_path in recent_thirty_files or node_relative_path in recent_thirty_files:
+        elif any(variant in recent_thirty_files for variant in path_variants):
             mutation_status = "modified"
             mutation_color = "#ffcc00"
         else:

@@ -11,6 +11,7 @@
       highlightNode,
     } = deps;
     let queuedHistoryIndex = null;
+    let queuedHistoryOptions = null;
     let playbackLoopActive = false;
     let previousSnapshot = null;
 
@@ -23,8 +24,25 @@
       return parts.slice(-4).join("/");
     }
 
+    function normalizePathLoose(pathValue) {
+      const normalized = String(pathValue || "").replace(/\\/g, "/").toLowerCase();
+      const parts = normalized.split("/").filter(Boolean);
+      if (!parts.length) {
+        return "";
+      }
+      const repoIdx = parts.lastIndexOf("repo");
+      if (repoIdx >= 0 && repoIdx < parts.length - 1) {
+        return parts.slice(repoIdx + 1).join("/");
+      }
+      return parts.slice(-3).join("/");
+    }
+
     function getNodeIdentity(node) {
       return `${String(node?.name || "").toLowerCase()}::${normalizePathTail(node?.file)}`;
+    }
+
+    function getNodeIdentityLoose(node) {
+      return `${String(node?.name || "").toLowerCase()}::${normalizePathLoose(node?.file)}`;
     }
 
     function buildSnapshotChangeSet(nextSnapshot) {
@@ -59,7 +77,58 @@
       return { added, removed, updated };
     }
 
-    async function loadHistorySnapshot(index) {
+    function applyEvolutionMutationColors(snapshot, transition) {
+      const state = getState();
+      const liveNodes = Array.isArray(state.liveGraphSnapshot?.nodes) ? state.liveGraphSnapshot.nodes : [];
+      const byStrict = new Map();
+      const byLoose = new Map();
+      const byName = new Map();
+
+      liveNodes.forEach((node) => {
+        byStrict.set(getNodeIdentity(node), node);
+        byLoose.set(getNodeIdentityLoose(node), node);
+        const key = String(node?.name || "").toLowerCase();
+        if (!byName.has(key)) {
+          byName.set(key, []);
+        }
+        byName.get(key).push(node);
+      });
+
+      const addedIds = new Set(transition?.added || []);
+      const updatedIds = new Set(transition?.updated || []);
+      const coloredNodes = (snapshot.nodes || []).map((node) => {
+        const nextNode = { ...node };
+        if (addedIds.has(node.id)) {
+          nextNode.mutation_status = "new";
+          nextNode.mutation_color = "#00ff88";
+          return nextNode;
+        }
+        if (updatedIds.has(node.id)) {
+          nextNode.mutation_status = "modified";
+          nextNode.mutation_color = "#ffcc00";
+          return nextNode;
+        }
+
+        const strictMatch = byStrict.get(getNodeIdentity(node));
+        const looseMatch = byLoose.get(getNodeIdentityLoose(node));
+        const sameName = byName.get(String(node?.name || "").toLowerCase()) || [];
+        const sameNameMatch = sameName.length === 1 ? sameName[0] : null;
+        const liveMatch = strictMatch || looseMatch || sameNameMatch;
+        if (liveMatch?.mutation_color) {
+          nextNode.mutation_color = liveMatch.mutation_color;
+          nextNode.mutation_status = liveMatch.mutation_status || nextNode.mutation_status || "stable";
+        } else if (!nextNode.mutation_color) {
+          nextNode.mutation_status = nextNode.mutation_status || "stable";
+          nextNode.mutation_color = "#aaaaaa";
+        }
+        return nextNode;
+      });
+
+      return { ...snapshot, nodes: coloredNodes };
+    }
+
+    async function loadHistorySnapshot(index, options = {}) {
+      const skipDiff = Boolean(options.skipDiff);
       const state = getState();
       if (!state.historyCommits.length) {
         return;
@@ -68,6 +137,7 @@
       const clamped = Math.max(0, Math.min(index, state.historyCommits.length - 1));
       if (state.historyRequestInFlight) {
         queuedHistoryIndex = clamped;
+        queuedHistoryOptions = options;
         return;
       }
       const commit = state.historyCommits[clamped];
@@ -103,15 +173,18 @@
           searchInput.value = "";
         }
         const transition = buildSnapshotChangeSet(snapshot);
-        updateGraph(snapshot, { instantRender: true, historySnapshot: true });
+        const snapshotWithColors = applyEvolutionMutationColors(snapshot, transition);
+        updateGraph(snapshotWithColors, { instantRender: true, historySnapshot: true });
         deps.applyHistoryTransition?.(transition);
         setMode("History");
         setStatus(`Viewing ${commit.short_hash} from ${commit.date}`);
         deps.setHistoryStatus(
           `${commit.short_hash} • ${commit.date} • +${transition.added.length} ~${transition.updated.length} -${transition.removed.length}`
         );
-        previousSnapshot = snapshot;
-        loadHistoryDiff({ silentStatus: true });
+        previousSnapshot = snapshotWithColors;
+        if (!skipDiff) {
+          loadHistoryDiff({ silentStatus: true });
+        }
       } catch (error) {
         console.error(error);
         deps.setHistoryStatus(error.message);
@@ -122,12 +195,19 @@
         syncHistoryButtons();
         if (queuedHistoryIndex !== null) {
           const nextIndex = queuedHistoryIndex;
+          const nextOptions = queuedHistoryOptions || {};
           queuedHistoryIndex = null;
+          queuedHistoryOptions = null;
           if (nextIndex !== getState().historyIndex) {
-            loadHistorySnapshot(nextIndex);
+            loadHistorySnapshot(nextIndex, nextOptions);
           }
         }
       }
+    }
+
+    function haltHistoryPlayback() {
+      playbackLoopActive = false;
+      deps.stopHistoryPlayback();
     }
 
     async function openHistoryMode() {
@@ -135,7 +215,9 @@
       if (state.historyRequestInFlight || state.isScanning) {
         return;
       }
+      haltHistoryPlayback();
       queuedHistoryIndex = null;
+      queuedHistoryOptions = null;
       previousSnapshot = null;
 
       try {
@@ -217,8 +299,9 @@
     }
 
     function closeHistoryMode() {
-      deps.stopHistoryPlayback();
+      haltHistoryPlayback();
       queuedHistoryIndex = null;
+      queuedHistoryOptions = null;
       previousSnapshot = null;
       document.getElementById("history-overlay")?.classList.remove("visible");
       const state = getState();
@@ -261,8 +344,7 @@
         return;
       }
       if (state.historyPlaybackTimer) {
-        deps.stopHistoryPlayback();
-        playbackLoopActive = false;
+        haltHistoryPlayback();
         syncHistoryButtons();
         return;
       }
@@ -294,8 +376,7 @@
       if (!state.historyPlaybackTimer) {
         return;
       }
-      playbackLoopActive = false;
-      deps.stopHistoryPlayback();
+      haltHistoryPlayback();
       syncHistoryButtons();
       toggleHistoryPlayback();
     }
@@ -341,6 +422,18 @@
         deps.setHistoryStatus(`Loading diff ${fromCommit.short_hash} -> ${toCommit.short_hash}...`);
       }
       try {
+        const parseApiPayload = async (response) => {
+          const text = await response.text();
+          if (!text) {
+            return { data: {}, rawText: "" };
+          }
+          try {
+            return { data: JSON.parse(text), rawText: text };
+          } catch (_parseError) {
+            return { data: null, rawText: text };
+          }
+        };
+
         const candidateUrls = [
           `/api/history-diff/${fromCommit.hash}/${toCommit.hash}`,
           `/api/history/diff/${fromCommit.hash}/${toCommit.hash}`,
@@ -349,16 +442,24 @@
         let requestError = null;
         for (const url of candidateUrls) {
           const response = await fetch(url);
-          const contentType = String(response.headers.get("content-type") || "").toLowerCase();
-          const payload = contentType.includes("application/json")
-            ? await response.json()
-            : { error: await response.text() };
+          const { data: payload, rawText } = await parseApiPayload(response);
           if (response.ok) {
-            data = payload;
+            data = payload && typeof payload === "object"
+              ? payload
+              : {
+                  shortstat: "Diff endpoint returned non-JSON response.",
+                  changed_files: [],
+                  from_commit: fromCommit.hash,
+                  to_commit: toCommit.hash,
+                  truncated: false,
+                  diff_excerpt: rawText || "",
+                };
             requestError = null;
             break;
           }
-          requestError = payload?.error || `Diff endpoint returned ${response.status}`;
+          const maybeError = payload && typeof payload === "object" ? payload.error : null;
+          const textPreview = String(rawText || "").replace(/\s+/g, " ").trim().slice(0, 220);
+          requestError = maybeError || textPreview || `Diff endpoint returned ${response.status}`;
         }
         if (!data) {
           throw new Error(requestError || "Failed to load commit diff");

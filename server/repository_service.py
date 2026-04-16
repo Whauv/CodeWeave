@@ -281,6 +281,7 @@ def diff_commits(
         raise ValueError(files_result.stderr.strip() or "Failed to compute commit diff files")
 
     changed_files: list[dict[str, str]] = []
+    status_counts = {"A": 0, "M": 0, "D": 0, "R": 0}
     for line in (files_result.stdout or "").splitlines():
         parts = line.strip().split("\t")
         if not parts:
@@ -288,16 +289,39 @@ def diff_commits(
         status = parts[0].strip() or "M"
         if status.startswith("R") and len(parts) >= 3:
             changed_files.append({"status": "R", "old_path": parts[1], "path": parts[2]})
+            status_counts["R"] += 1
         elif len(parts) >= 2:
-            changed_files.append({"status": status[0], "path": parts[1]})
+            normalized = status[0]
+            changed_files.append({"status": normalized, "path": parts[1]})
+            if normalized in status_counts:
+                status_counts[normalized] += 1
         if len(changed_files) >= max_files:
             break
+
+    patch_result = run_git_command(
+        repo_root,
+        [
+            "diff",
+            "--no-color",
+            "--unified=1",
+            "--stat=160,120",
+            from_commit,
+            to_commit,
+        ],
+        timeout=120,
+    )
+    diff_excerpt = ""
+    if patch_result.returncode == 0:
+        lines = (patch_result.stdout or "").splitlines()
+        diff_excerpt = "\n".join(lines[:220]).strip()
 
     return {
         "from_commit": from_commit,
         "to_commit": to_commit,
         "shortstat": (stat_result.stdout or "").strip() or "No file-level changes detected.",
         "changed_files": changed_files,
+        "status_counts": status_counts,
+        "diff_excerpt": diff_excerpt,
         "truncated": len(changed_files) >= max_files,
     }
 

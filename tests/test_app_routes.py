@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 try:
     from server.app import app
@@ -59,6 +60,31 @@ class AppRouteTests(unittest.TestCase):
         response = self.client.post("/api/chat", json={"message": "What breaks?"})
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.get_json()["error"], "No graph scanned yet")
+
+    def test_history_diff_endpoint_contract_canonical_and_legacy(self) -> None:
+        STATE.scan_context = {"scan_root": str("."), "source_kind": "local", "language": "python"}
+        diff_payload = {
+            "from_commit": "abc123",
+            "to_commit": "def456",
+            "shortstat": "1 file changed, 3 insertions(+)",
+            "changed_files": [{"status": "M", "path": "app.py"}],
+            "status_counts": {"A": 0, "M": 1, "D": 0, "R": 0},
+            "diff_excerpt": "diff --git a/app.py b/app.py",
+            "truncated": False,
+        }
+        with patch("server.app.is_git_repo", return_value=True), patch("server.app.diff_commits", return_value=diff_payload):
+            canonical = self.client.get("/api/history-diff/abc123/def456")
+            legacy = self.client.get("/api/history/diff/abc123/def456")
+
+        self.assertEqual(canonical.status_code, 200)
+        self.assertEqual(legacy.status_code, 200)
+        canonical_payload = canonical.get_json()
+        legacy_payload = legacy.get_json()
+        for payload in (canonical_payload, legacy_payload):
+            self.assertIn("shortstat", payload)
+            self.assertIn("changed_files", payload)
+            self.assertIn("truncated", payload)
+            self.assertIn("status_counts", payload)
 
 
 if __name__ == "__main__":
