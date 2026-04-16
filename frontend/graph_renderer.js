@@ -55,27 +55,48 @@
       });
 
       const ordered = [...layers.keys()].sort((a, b) => a - b);
+      const nodeCount = nodes.length;
       const left = 110;
       const right = 140;
       const top = 110;
       const bottom = 90;
       const xStep = ordered.length > 1 ? (width - left - right) / (ordered.length - 1) : 0;
 
-      const orderIndex = new Map();
-      ordered.forEach((depth, depthIndex) => {
+      const layerOrderMap = new Map();
+      ordered.forEach((depth) => {
         const rawLayer = layers.get(depth) || [];
-        const previousDepth = ordered[depthIndex - 1];
-        const previousOrder = orderIndex.get(previousDepth) || new Map();
+        const seeded = rawLayer.slice().sort((a, b) => {
+          const clusterA = String(a.clusterKey || a.file || a.name);
+          const clusterB = String(b.clusterKey || b.file || b.name);
+          return (
+            clusterA.localeCompare(clusterB) ||
+            (((b.outgoingCount || 0) + (b.incomingCount || 0)) -
+              ((a.outgoingCount || 0) + (a.incomingCount || 0))) ||
+            a.name.localeCompare(b.name)
+          );
+        });
+        layers.set(depth, seeded);
+        const seedOrder = new Map();
+        seeded.forEach((node, index) => seedOrder.set(node.id, index));
+        layerOrderMap.set(depth, seedOrder);
+      });
 
-        const layer = rawLayer.slice().sort((a, b) => {
-          const incomingA = incoming.get(a.id) || [];
-          const incomingB = incoming.get(b.id) || [];
-          const barycenterA = incomingA.length
-            ? incomingA.reduce((sum, id) => sum + (previousOrder.get(id) ?? 0), 0) / incomingA.length
-            : Number.MAX_SAFE_INTEGER;
-          const barycenterB = incomingB.length
-            ? incomingB.reduce((sum, id) => sum + (previousOrder.get(id) ?? 0), 0) / incomingB.length
-            : Number.MAX_SAFE_INTEGER;
+      const sortLayerByBarycenter = (depth, direction) => {
+        const rawLayer = layers.get(depth) || [];
+        const neighborDepth = direction === "forward" ? depth - 1 : depth + 1;
+        const neighborOrder = layerOrderMap.get(neighborDepth) || new Map();
+        const neighborFn = direction === "forward" ? incoming : outgoing;
+        const fallbackBarycenter = Number.MAX_SAFE_INTEGER;
+
+        const sortedLayer = rawLayer.slice().sort((a, b) => {
+          const neighborsA = neighborFn.get(a.id) || [];
+          const neighborsB = neighborFn.get(b.id) || [];
+          const barycenterA = neighborsA.length
+            ? neighborsA.reduce((sum, id) => sum + (neighborOrder.get(id) ?? 0), 0) / neighborsA.length
+            : fallbackBarycenter;
+          const barycenterB = neighborsB.length
+            ? neighborsB.reduce((sum, id) => sum + (neighborOrder.get(id) ?? 0), 0) / neighborsB.length
+            : fallbackBarycenter;
           const clusterA = String(a.clusterKey || a.file || a.name);
           const clusterB = String(b.clusterKey || b.file || b.name);
           return (
@@ -87,9 +108,33 @@
           );
         });
 
+        layers.set(depth, sortedLayer);
         const layerOrder = new Map();
-        layer.forEach((node, index) => layerOrder.set(node.id, index));
-        orderIndex.set(depth, layerOrder);
+        sortedLayer.forEach((node, index) => layerOrder.set(node.id, index));
+        layerOrderMap.set(depth, layerOrder);
+      };
+
+      const sweepIterations = nodeCount > 320 ? 3 : nodeCount > 160 ? 2 : 1;
+      for (let iteration = 0; iteration < sweepIterations; iteration += 1) {
+        ordered.forEach((depth, index) => {
+          if (index === 0) {
+            return;
+          }
+          sortLayerByBarycenter(depth, "forward");
+        });
+        ordered
+          .slice()
+          .reverse()
+          .forEach((depth, reversedIndex) => {
+            if (reversedIndex === 0) {
+              return;
+            }
+            sortLayerByBarycenter(depth, "backward");
+          });
+      }
+
+      ordered.forEach((depth) => {
+        const layer = layers.get(depth) || [];
 
         const grouped = [];
         let currentGroup = null;
@@ -102,20 +147,54 @@
           currentGroup.nodes.push(node);
         });
 
-        const intraNodeGap = Math.max(16, Math.min(34, (height - top - bottom) / Math.max(layer.length + grouped.length, 8)));
-        const interGroupGap = Math.max(10, Math.min(28, intraNodeGap * 0.85));
-        const totalHeight =
-          grouped.reduce((sum, group) => sum + group.nodes.length * intraNodeGap, 0) +
-          Math.max(0, grouped.length - 1) * interGroupGap;
-        let cursorY = Math.max(top, (height - totalHeight) / 2);
+        const usableHeight = Math.max(220, height - top - bottom);
+        const layerDensity = layer.length / Math.max(1, ordered.length);
+        const densityFactor = nodeCount > 320 ? 0.62 : nodeCount > 180 ? 0.74 : 0.88;
+        const intraNodeGapBase = Math.max(
+          11,
+          Math.min(30, (usableHeight / Math.max(layer.length + grouped.length, 8)) * densityFactor * (layerDensity > 26 ? 0.86 : 1))
+        );
+        const interGroupGapBase = Math.max(6, Math.min(24, intraNodeGapBase * (nodeCount > 260 ? 0.55 : 0.8)));
+        const maxLayerRows = nodeCount > 460 ? 34 : nodeCount > 320 ? 40 : nodeCount > 220 ? 48 : 60;
+        const laneCount = Math.min(3, Math.max(1, Math.ceil(layer.length / maxLayerRows)));
+        const laneSpread = laneCount > 1 ? Math.min(Math.max(26, xStep * 0.42), nodeCount > 320 ? 96 : 84) : 0;
+        const laneBuckets = Array.from({ length: laneCount }, () => ({ groups: [], count: 0 }));
 
-        grouped.forEach((group) => {
-          group.nodes.forEach((node) => {
-            node.x = left + depth * xStep;
-            node.y = cursorY;
-            cursorY += intraNodeGap;
+        if (laneCount === 1) {
+          laneBuckets[0].groups = grouped.slice();
+          laneBuckets[0].count = layer.length;
+        } else {
+          grouped.forEach((group) => {
+            const targetLane = laneBuckets.reduce(
+              (bestIndex, lane, laneIndex) =>
+                lane.count < laneBuckets[bestIndex].count ? laneIndex : bestIndex,
+              0
+            );
+            laneBuckets[targetLane].groups.push(group);
+            laneBuckets[targetLane].count += group.nodes.length;
           });
-          cursorY += interGroupGap;
+        }
+
+        laneBuckets.forEach((lane, laneIndex) => {
+          const intraNodeGap = Math.max(10, intraNodeGapBase * (laneCount > 1 ? 0.92 : 1));
+          const interGroupGap = Math.max(5, interGroupGapBase * (laneCount > 1 ? 0.9 : 1));
+          const totalHeight =
+            lane.groups.reduce((sum, group) => sum + group.nodes.length * intraNodeGap, 0) +
+            Math.max(0, lane.groups.length - 1) * interGroupGap;
+          let cursorY = Math.max(top, (height - totalHeight) / 2);
+          const laneOffset =
+            laneCount === 1
+              ? 0
+              : ((laneIndex - (laneCount - 1) / 2) / Math.max(1, laneCount - 1)) * laneSpread;
+
+          lane.groups.forEach((group) => {
+            group.nodes.forEach((node) => {
+              node.x = left + depth * xStep + laneOffset;
+              node.y = cursorY;
+              cursorY += intraNodeGap;
+            });
+            cursorY += interGroupGap;
+          });
         });
       });
 
@@ -123,18 +202,62 @@
         node.x = Math.max(left, Math.min(width - right, node.x || width / 2));
         node.y = Math.max(top, Math.min(height - bottom, node.y || height / 2));
       });
+
+      return depthMap;
     }
 
     function treePath(link) {
+      const sourceOffset =
+        (((link._sourceRank ?? 0) - ((link._sourceCount ?? 1) - 1) / 2) *
+          (link._sourceCount && link._sourceCount > 1 ? 4 : 0));
+      const targetOffset =
+        (((link._targetRank ?? 0) - ((link._targetCount ?? 1) - 1) / 2) *
+          (link._targetCount && link._targetCount > 1 ? 4 : 0));
+      const startY = (link.source.y || 0) + sourceOffset;
+      const endY = (link.target.y || 0) + targetOffset;
       const midX = (link.source.x + link.target.x) / 2;
-      return `M${link.source.x},${link.source.y} C${midX},${link.source.y} ${midX},${link.target.y} ${link.target.x},${link.target.y}`;
+      return `M${link.source.x},${startY} C${midX},${startY} ${midX},${endY} ${link.target.x},${endY}`;
     }
 
-    function getDeclutteredTreeLinks(nodes, links) {
+    function decorateTreeLinksForSplay(links) {
+      const bySource = new Map();
+      const byTarget = new Map();
+      links.forEach((link) => {
+        if (!bySource.has(link.source.id)) {
+          bySource.set(link.source.id, []);
+        }
+        bySource.get(link.source.id).push(link);
+        if (!byTarget.has(link.target.id)) {
+          byTarget.set(link.target.id, []);
+        }
+        byTarget.get(link.target.id).push(link);
+      });
+
+      bySource.forEach((items) => {
+        items
+          .slice()
+          .sort((left, right) => (left.target.y || 0) - (right.target.y || 0))
+          .forEach((link, index, sorted) => {
+            link._sourceRank = index;
+            link._sourceCount = sorted.length;
+          });
+      });
+      byTarget.forEach((items) => {
+        items
+          .slice()
+          .sort((left, right) => (left.source.y || 0) - (right.source.y || 0))
+          .forEach((link, index, sorted) => {
+            link._targetRank = index;
+            link._targetCount = sorted.length;
+          });
+      });
+    }
+
+    function getDeclutteredTreeLinks(nodes, links, depthMap = null) {
       if (!nodes.length || nodes.length <= 90) {
         return links;
       }
-      const maxIncomingPerTarget = nodes.length > 260 ? 2 : nodes.length > 160 ? 3 : 4;
+      const maxIncomingPerTarget = nodes.length > 420 ? 2 : nodes.length > 260 ? 3 : nodes.length > 160 ? 4 : 5;
       const incomingByTarget = new Map();
       links.forEach((link) => {
         const targetId = link.target.id;
@@ -145,23 +268,123 @@
       });
 
       const kept = [];
+      const linkScore = (link) => {
+        const depthDelta = depthMap
+          ? Math.abs((depthMap.get(link.target.id) || 0) - (depthMap.get(link.source.id) || 0))
+          : 1;
+        return (
+          (link.weight || 1) +
+          1 / Math.max(1, depthDelta) +
+          (link.source.outgoingCount || 0) * 0.08 +
+          (link.source.incomingCount || 0) * 0.04
+        );
+      };
       incomingByTarget.forEach((incomingLinks) => {
-        incomingLinks
+        const forwardOnlyLinks =
+          nodes.length > 220 && depthMap
+            ? incomingLinks.filter((link) => {
+                const sourceDepth = depthMap.get(link.source.id) || 0;
+                const targetDepth = depthMap.get(link.target.id) || 0;
+                return sourceDepth <= targetDepth;
+              })
+            : incomingLinks;
+        const candidateLinks = forwardOnlyLinks.length ? forwardOnlyLinks : incomingLinks;
+        const sorted = candidateLinks
           .sort((left, right) => {
-            const rightWeight =
-              (right.weight || 1) +
-              (right.source.outgoingCount || 0) * 0.08 +
-              (right.source.incomingCount || 0) * 0.04;
-            const leftWeight =
-              (left.weight || 1) +
-              (left.source.outgoingCount || 0) * 0.08 +
-              (left.source.incomingCount || 0) * 0.04;
-            return rightWeight - leftWeight;
-          })
-          .slice(0, maxIncomingPerTarget)
-          .forEach((link) => kept.push(link));
+            return linkScore(right) - linkScore(left);
+          });
+
+        const nearestParent = sorted.find((link) => {
+          if (!depthMap) {
+            return true;
+          }
+          const srcDepth = depthMap.get(link.source.id) || 0;
+          const dstDepth = depthMap.get(link.target.id) || 0;
+          return srcDepth <= dstDepth;
+        });
+        const selected = sorted.slice(0, maxIncomingPerTarget);
+        if (nearestParent && !selected.includes(nearestParent)) {
+          selected[selected.length - 1] = nearestParent;
+        }
+        selected.forEach((link) => kept.push(link));
       });
+
+      if (nodes.length > 140) {
+        const maxOutgoingPerSource = nodes.length > 420 ? 3 : nodes.length > 260 ? 4 : 5;
+        const bySource = new Map();
+        kept.forEach((link) => {
+          if (!bySource.has(link.source.id)) {
+            bySource.set(link.source.id, []);
+          }
+          bySource.get(link.source.id).push(link);
+        });
+        const outgoingPruned = [];
+        bySource.forEach((sourceLinks) => {
+          sourceLinks
+            .sort((left, right) => linkScore(right) - linkScore(left))
+            .slice(0, maxOutgoingPerSource)
+            .forEach((link) => outgoingPruned.push(link));
+        });
+        const unique = new Map();
+        outgoingPruned.forEach((link) => {
+          unique.set(`${link.source.id}::${link.target.id}`, link);
+        });
+        const compact = [...unique.values()];
+        if (nodes.length > 260) {
+          const globalCap = Math.max(nodes.length * 2, 260);
+          compact.sort((left, right) => linkScore(right) - linkScore(left));
+          return compact.slice(0, globalCap);
+        }
+        return compact;
+      }
       return kept;
+    }
+
+    function getTreeLabelVisibility(nodes, depthMap) {
+      if (!nodes.length) {
+        return new Set();
+      }
+      if (nodes.length <= 140) {
+        return new Set(nodes.map((node) => node.id));
+      }
+
+      const visible = new Set();
+      nodes.forEach((node) => {
+        if (
+          node.isCluster ||
+          String(node.mutation_status || "").toLowerCase() === "hotspot" ||
+          String(node.mutation_status || "").toLowerCase() === "new"
+        ) {
+          visible.add(node.id);
+        }
+      });
+
+      const layers = new Map();
+      nodes.forEach((node) => {
+        const depth = depthMap.get(node.id) || 0;
+        if (!layers.has(depth)) {
+          layers.set(depth, []);
+        }
+        layers.get(depth).push(node);
+      });
+
+      const stride = nodes.length > 420 ? 8 : nodes.length > 260 ? 6 : 4;
+      layers.forEach((layerNodes) => {
+        const ranked = layerNodes.slice().sort((a, b) => {
+          const degreeA = (a.incomingCount || 0) + (a.outgoingCount || 0);
+          const degreeB = (b.incomingCount || 0) + (b.outgoingCount || 0);
+          return degreeB - degreeA || String(a.name || "").localeCompare(String(b.name || ""));
+        });
+        const keepTop = Math.max(10, Math.floor(layerNodes.length * (nodes.length > 320 ? 0.24 : 0.34)));
+        ranked.slice(0, keepTop).forEach((node) => visible.add(node.id));
+        ranked.forEach((node, index) => {
+          if (index % stride === 0) {
+            visible.add(node.id);
+          }
+        });
+      });
+
+      return visible;
     }
 
     function buildSvgShell(svg, currentZoomTransform, onZoomStart, onZoom, onZoomEnd) {
@@ -196,9 +419,11 @@
 
     function renderTreeGraph(data, width, height, layers, bindNodeInteractions) {
       const { nodes, links } = getGraphCollections(data);
-      const renderLinks = getDeclutteredTreeLinks(nodes, links);
+      const depthMap = applyTreeLayout(nodes, links, width, height);
+      const renderLinks = getDeclutteredTreeLinks(nodes, links, depthMap);
+      decorateTreeLinksForSplay(renderLinks);
+      const visibleLabels = getTreeLabelVisibility(nodes, depthMap);
       const palette = getGraphPalette();
-      applyTreeLayout(nodes, renderLinks, width, height);
 
       const linkTransition = d3.transition().duration(420).ease(d3.easeCubicOut);
       const nodeTransition = d3.transition().duration(520).ease(d3.easeBackOut.overshoot(1.15));
@@ -279,6 +504,7 @@
         .text((node) => node.isCluster ? `${truncateLabel(node.name)} (${node.memberCount})` : truncateLabel(node.name))
         .attr("x", (node) => node.x + getNodeRadius(node) + 10)
         .attr("y", (node) => node.y + 4)
+        .attr("display", (node) => (visibleLabels.has(node.id) ? null : "none"))
         .attr("fill", palette.label)
         .attr("font-size", (node) => node.isCluster ? 12.5 : 12)
         .attr("font-weight", (node) => node.isCluster ? 700 : 500)

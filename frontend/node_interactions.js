@@ -141,6 +141,7 @@
         renderGraph(state.graphData);
       }
       updateState({ selectedNodeId: nodeId });
+      globalScope.__CODEWEAVE_SELECTED_NODE_ID__ = nodeId || null;
       const selected = getSelectedNode();
       if (selected) {
         updateState({ currentFocusedClusterKey: deps.getClusterKey(selected) });

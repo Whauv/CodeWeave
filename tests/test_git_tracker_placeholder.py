@@ -31,6 +31,7 @@ class _FakeRepository:
             _FakeCommit("c4", ["fresh_recent.py", "hotspot.py"]),
             _FakeCommit("c5", ["other_recent.py", "hotspot.py"]),
             _FakeCommit("c6", ["modified_file.py"]),
+            _FakeCommit("c7", ["src/module.py"]),
         ]
 
     def traverse_commits(self):
@@ -61,6 +62,32 @@ class GitTrackerPlaceholderTests(unittest.TestCase):
         self.assertEqual(by_name["modified_file"]["mutation_status"], "modified")
         self.assertEqual(by_name["hotspot"]["mutation_status"], "hotspot")
         self.assertEqual(by_name["stable"]["mutation_status"], "stable")
+
+    def test_git_tracker_matches_absolute_relative_and_snapshot_style_paths(self) -> None:
+        repo_root = Path.cwd() / "tests_runtime_git_tracker_paths"
+        shutil.rmtree(repo_root, ignore_errors=True)
+        try:
+            repo_root.mkdir(parents=True, exist_ok=True)
+            (repo_root / ".git").mkdir()
+            absolute_path = str((repo_root / "src" / "module.py").resolve())
+            relative_path = "src/module.py"
+            snapshot_path = str(
+                (repo_root / ".codeweave_tmp" / "codeweave_history_x" / "repo" / "src" / "module.py").resolve()
+            )
+            nodes = [
+                {"id": "1", "name": "abs", "file": absolute_path},
+                {"id": "2", "name": "rel", "file": relative_path},
+                {"id": "3", "name": "snap", "file": snapshot_path},
+            ]
+
+            with patch.object(mutation_tracker, "Repository", _FakeRepository):
+                updated = mutation_tracker.track_mutations(str(repo_root), nodes)
+        finally:
+            shutil.rmtree(repo_root, ignore_errors=True)
+
+        for node in updated:
+            self.assertEqual(node["mutation_status"], "modified")
+            self.assertEqual(node["mutation_color"], "#ffcc00")
 
 
 if __name__ == "__main__":

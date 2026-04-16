@@ -89,4 +89,35 @@ test.describe("CodeWeave smoke flow", () => {
     await expect(page.locator("#history-commit-meta")).toContainText("2 commits available", { timeout: 30000 });
     await expect(page.getByRole("button", { name: "Play Timeline" })).toBeEnabled();
   });
+
+  test("evolution controls navigate commits, toggle playback, and load diff", async ({ page }) => {
+    await page.goto("/");
+    await page.selectOption("#language-input", "typescript");
+    await page.locator("#path-input").fill(gitHistoryFixturePath);
+    await page.getByRole("button", { name: "Scan Project" }).click();
+    await expect(page.locator("#metric-nodes")).not.toHaveText("0", { timeout: 30000 });
+
+    await page.getByRole("button", { name: "Evolution" }).click();
+    await expect(page.locator("#history-overlay")).toHaveClass(/visible/, { timeout: 30000 });
+
+    const oldestHash = (await page.locator("#history-start-label").textContent())?.trim() || "";
+    const newestHash = (await page.locator("#history-end-label").textContent())?.trim() || "";
+    expect(oldestHash.length).toBeGreaterThan(0);
+    expect(newestHash.length).toBeGreaterThan(0);
+
+    await page.getByRole("button", { name: "Prev Commit" }).click();
+    await expect(page.locator("#history-commit-meta")).toContainText(oldestHash, { timeout: 30000 });
+
+    await page.getByRole("button", { name: "Next Commit" }).click();
+    await expect(page.locator("#history-commit-meta")).toContainText(newestHash, { timeout: 30000 });
+
+    await page.getByRole("button", { name: "Play Timeline" }).click();
+    await expect(page.getByRole("button", { name: "Pause Timeline" })).toBeVisible({ timeout: 30000 });
+    await page.getByRole("button", { name: "Pause Timeline" }).click();
+    await expect(page.getByRole("button", { name: "Play Timeline" })).toBeVisible({ timeout: 30000 });
+
+    await page.getByRole("button", { name: "Show Diff" }).click();
+    await expect(page.locator("#history-diff-body")).not.toContainText("Click `Show Diff`", { timeout: 30000 });
+    await expect(page.locator("#history-diff-body")).not.toContainText("Failed to load commit diff", { timeout: 30000 });
+  });
 });

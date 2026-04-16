@@ -234,7 +234,7 @@
       border-radius: 14px;
       border: 1px solid var(--border);
       background: rgba(255, 255, 255, 0.03);
-      max-height: 220px;
+      max-height: 320px;
       overflow: auto;
     }
 
@@ -293,6 +293,51 @@
       text-overflow: ellipsis;
       min-width: 0;
       flex: 1;
+    }
+
+    .history-diff-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .history-diff-count {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 9px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      font-size: 0.76rem;
+    }
+
+    .history-diff-patch {
+      border-top: 1px solid var(--border);
+      padding-top: 8px;
+    }
+
+    .history-diff-patch summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.82rem;
+      margin-bottom: 8px;
+    }
+
+    .history-diff-patch pre {
+      margin: 0;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.24);
+      color: var(--text);
+      font-size: 0.74rem;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 220px;
+      overflow: auto;
     }
 
     .history-commit-line {
@@ -1456,6 +1501,36 @@
       line-height: 1.4;
     }
 
+    .action-plan-block {
+      display: grid;
+      gap: 10px;
+    }
+
+    .action-plan-content {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.03);
+      padding: 10px;
+      color: var(--text);
+      font-size: 0.86rem;
+      line-height: 1.5;
+      max-height: 220px;
+      overflow: auto;
+    }
+
+    .action-plan-content .muted {
+      color: var(--muted);
+    }
+
+    .action-plan-content ul {
+      margin: 8px 0 0;
+      padding-left: 16px;
+    }
+
+    .action-plan-content li {
+      margin: 4px 0;
+    }
+
     #monaco-modal {
       position: fixed;
       inset: 0;
@@ -1872,6 +1947,7 @@
                       <option value="12000">Slowest</option>
                     </select>
                   </label>
+                  <div id="history-frame-counter" class="history-badge">0 / 0</div>
                   <div id="history-status" class="history-badge">Load a scanned git repo to begin.</div>
                 </div>
                 <div class="history-scrub-row">
@@ -1962,6 +2038,17 @@
           <div class="panel-card">
             <div class="panel-label">Blast radius</div>
             <div id="blast-info">Right-click a node to simulate impact.</div>
+          </div>
+
+          <div class="panel-card action-plan-block">
+            <div class="panel-label">Action plan</div>
+            <div id="action-plan-content" class="action-plan-content">
+              <div class="muted">Select a node, then click Generate Plan to produce rollout steps and test focus.</div>
+            </div>
+            <div class="panel-actions">
+              <button id="generate-action-plan-btn" class="panel-action">Generate Plan</button>
+              <button id="export-action-plan-btn" class="panel-action" disabled>Export Markdown</button>
+            </div>
           </div>
         </div>
 

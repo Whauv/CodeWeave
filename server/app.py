@@ -26,6 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from graph import blast_radius
 from plugins import get_language_options, get_plugin
+from server.action_plan_service import build_action_plan
 from server.chat_service import chat_with_provider
 from server.repository_service import (
     diff_commits,
@@ -142,6 +143,31 @@ def get_blast_radius(node_id: str) -> Any:
     except Exception as exc:
         LOGGER.exception("Blast radius failed: %s", exc)
         return jsonify({"error": str(exc)}), 400
+
+
+@app.get("/api/action-plan/<node_id>")
+def get_action_plan(node_id: str) -> Any:
+    try:
+        if STATE.graph_cache is None:
+            return jsonify({"error": "No graph scanned yet"}), 404
+
+        plan = build_action_plan(STATE.graph_cache, node_id)
+        if plan.get("error"):
+            return jsonify({"error": str(plan.get("error"))}), 404
+        return jsonify(plan)
+    except Exception as exc:
+        LOGGER.exception("Action plan generation failed: %s", exc)
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.get("/api/action/plan/<node_id>")
+def get_action_plan_legacy_slash(node_id: str) -> Any:
+    return get_action_plan(node_id)
+
+
+@app.get("/api/action_plan/<node_id>")
+def get_action_plan_legacy_underscore(node_id: str) -> Any:
+    return get_action_plan(node_id)
 
 
 @app.post("/api/chat")
