@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections import Counter
 from typing import Any
 
@@ -10,6 +11,9 @@ except Exception:
     Groq = None
 
 from graph import blast_radius
+
+CHAT_RATE_LIMIT_UNTIL = 0.0
+CHAT_RATE_LIMIT_COOLDOWN_SECONDS = 30
 
 
 def _get_node_from_graph(graph_data: dict[str, Any] | None, node_id: str) -> dict[str, Any] | None:
@@ -315,17 +319,28 @@ def build_chat_messages(
 
 
 def chat_with_groq(messages: list[dict[str, str]], model: str) -> str:
+    global CHAT_RATE_LIMIT_UNTIL
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key or Groq is None:
         raise ValueError("Missing GROQ_API_KEY for chat")
+    if CHAT_RATE_LIMIT_UNTIL > time.time():
+        wait_seconds = max(1, int(CHAT_RATE_LIMIT_UNTIL - time.time()))
+        raise ValueError(f"Groq is rate limited right now. Try again in about {wait_seconds}s.")
 
-    client = Groq(api_key=api_key)
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0.2,
-        max_tokens=500,
-    )
+    client = Groq(api_key=api_key, max_retries=0)
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.2,
+            max_tokens=500,
+        )
+    except Exception as exc:
+        message = str(exc).lower()
+        if "429" in message or "rate limit" in message or "too many requests" in message:
+            CHAT_RATE_LIMIT_UNTIL = time.time() + CHAT_RATE_LIMIT_COOLDOWN_SECONDS
+            raise ValueError("Groq is rate limited right now. Try again in about 30s.") from exc
+        raise
     if not response.choices:
         return "No response generated."
     return (response.choices[0].message.content or "No response generated.").strip()

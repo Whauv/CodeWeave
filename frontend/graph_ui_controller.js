@@ -17,13 +17,18 @@
       onSearch,
       onLoadMore,
       onShowAll,
+      onStopBuild,
       onTreeLayout,
       onForceLayout,
       onToggleCluster,
       onOpenHistory,
       onCloseHistory,
       onToggleHistoryPlayback,
+      onHistoryPrev,
+      onHistoryNext,
+      onHistoryDiff,
       onLoadHistorySnapshot,
+      onSetHistoryPlaybackDelay,
       onScan,
     } = deps;
 
@@ -263,6 +268,12 @@
       getDom("history-close-btn")?.addEventListener("click", onCloseHistory);
       getDom("history-live-btn")?.addEventListener("click", onCloseHistory);
       getDom("history-play-btn")?.addEventListener("click", onToggleHistoryPlayback);
+      getDom("history-prev-btn")?.addEventListener("click", onHistoryPrev);
+      getDom("history-next-btn")?.addEventListener("click", onHistoryNext);
+      getDom("history-diff-btn")?.addEventListener("click", onHistoryDiff);
+      getDom("history-speed-select")?.addEventListener("change", (event) => {
+        onSetHistoryPlaybackDelay?.(Number(event.target.value || 5000));
+      });
       getDom("history-range")?.addEventListener("input", (event) => {
         deps.stopHistoryPlayback();
         onLoadHistorySnapshot(Number(event.target.value || 0));
@@ -280,6 +291,7 @@
       getDom("search-input")?.addEventListener("input", (event) => onSearch(event.target.value));
       getDom("graph-load-more-btn")?.addEventListener("click", onLoadMore);
       getDom("graph-show-all-btn")?.addEventListener("click", onShowAll);
+      getDom("stop-build-btn")?.addEventListener("click", onStopBuild);
       getDom("export-svg-btn")?.addEventListener("click", exportGraphSvg);
       getDom("export-png-btn")?.addEventListener("click", exportGraphPng);
       getDom("export-json-btn")?.addEventListener("click", exportGraphJson);

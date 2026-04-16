@@ -10,14 +10,66 @@
       updateGraph,
       highlightNode,
     } = deps;
+    let queuedHistoryIndex = null;
+    let playbackLoopActive = false;
+    let previousSnapshot = null;
+
+    function normalizePathTail(pathValue) {
+      const normalized = String(pathValue || "").replace(/\\/g, "/").toLowerCase();
+      const parts = normalized.split("/").filter(Boolean);
+      if (!parts.length) {
+        return "";
+      }
+      return parts.slice(-4).join("/");
+    }
+
+    function getNodeIdentity(node) {
+      return `${String(node?.name || "").toLowerCase()}::${normalizePathTail(node?.file)}`;
+    }
+
+    function buildSnapshotChangeSet(nextSnapshot) {
+      const beforeNodes = Array.isArray(previousSnapshot?.nodes) ? previousSnapshot.nodes : [];
+      const afterNodes = Array.isArray(nextSnapshot?.nodes) ? nextSnapshot.nodes : [];
+      const beforeByIdentity = new Map(beforeNodes.map((node) => [getNodeIdentity(node), node]));
+      const afterByIdentity = new Map(afterNodes.map((node) => [getNodeIdentity(node), node]));
+      const added = [];
+      const removed = [];
+      const updated = [];
+
+      afterByIdentity.forEach((afterNode, identity) => {
+        const beforeNode = beforeByIdentity.get(identity);
+        if (!beforeNode) {
+          added.push(afterNode.id);
+          return;
+        }
+        const changed =
+          (beforeNode.line || 0) !== (afterNode.line || 0) ||
+          String(beforeNode.source_code || "") !== String(afterNode.source_code || "");
+        if (changed) {
+          updated.push(afterNode.id);
+        }
+      });
+
+      beforeByIdentity.forEach((_beforeNode, identity) => {
+        if (!afterByIdentity.has(identity)) {
+          removed.push(identity);
+        }
+      });
+
+      return { added, removed, updated };
+    }
 
     async function loadHistorySnapshot(index) {
       const state = getState();
-      if (state.historyRequestInFlight || !state.historyCommits.length) {
+      if (!state.historyCommits.length) {
         return;
       }
 
       const clamped = Math.max(0, Math.min(index, state.historyCommits.length - 1));
+      if (state.historyRequestInFlight) {
+        queuedHistoryIndex = clamped;
+        return;
+      }
       const commit = state.historyCommits[clamped];
       if (!commit) {
         return;
@@ -50,10 +102,16 @@
         if (searchInput) {
           searchInput.value = "";
         }
-        updateGraph(snapshot);
+        const transition = buildSnapshotChangeSet(snapshot);
+        updateGraph(snapshot, { instantRender: true, historySnapshot: true });
+        deps.applyHistoryTransition?.(transition);
         setMode("History");
         setStatus(`Viewing ${commit.short_hash} from ${commit.date}`);
-        deps.setHistoryStatus(`${commit.short_hash} • ${commit.date}`);
+        deps.setHistoryStatus(
+          `${commit.short_hash} • ${commit.date} • +${transition.added.length} ~${transition.updated.length} -${transition.removed.length}`
+        );
+        previousSnapshot = snapshot;
+        loadHistoryDiff({ silentStatus: true });
       } catch (error) {
         console.error(error);
         deps.setHistoryStatus(error.message);
@@ -62,6 +120,13 @@
         setState({ historyRequestInFlight: false });
         renderHistoryCommitInfo();
         syncHistoryButtons();
+        if (queuedHistoryIndex !== null) {
+          const nextIndex = queuedHistoryIndex;
+          queuedHistoryIndex = null;
+          if (nextIndex !== getState().historyIndex) {
+            loadHistorySnapshot(nextIndex);
+          }
+        }
       }
     }
 
@@ -70,6 +135,8 @@
       if (state.historyRequestInFlight || state.isScanning) {
         return;
       }
+      queuedHistoryIndex = null;
+      previousSnapshot = null;
 
       try {
         if (!state.graphData) {
@@ -77,15 +144,20 @@
           return;
         }
 
-        if (!state.liveGraphSnapshot && state.graphData) {
-          setState({
-            liveGraphSnapshot: JSON.parse(JSON.stringify(state.graphData)),
-            liveSelectedNodeId: state.selectedNodeId,
-          });
-        }
+        setState({
+          liveGraphSnapshot: JSON.parse(JSON.stringify(state.graphData)),
+          liveSelectedNodeId: state.selectedNodeId,
+        });
 
         document.getElementById("history-overlay")?.classList.add("visible");
         deps.setHistoryStatus("Loading timeline...");
+        deps.renderHistoryDiff?.({
+          shortstat: "Click Show Diff to compare commits.",
+          changed_files: [],
+          from_commit: "",
+          to_commit: "",
+          truncated: false,
+        });
         syncHistoryButtons();
 
         const response = await fetch("/api/history");
@@ -146,23 +218,38 @@
 
     function closeHistoryMode() {
       deps.stopHistoryPlayback();
+      queuedHistoryIndex = null;
+      previousSnapshot = null;
       document.getElementById("history-overlay")?.classList.remove("visible");
       const state = getState();
+      const restoredLiveSnapshot = state.liveGraphSnapshot
+        ? JSON.parse(JSON.stringify(state.liveGraphSnapshot))
+        : null;
+      const restoredSelectedNodeId = state.liveSelectedNodeId;
       setState({
         historyMode: false,
         historyCommits: [],
         historyMeta: null,
       });
       state.historySnapshotCache.clear();
-      if (state.liveGraphSnapshot) {
-        updateGraph(state.liveGraphSnapshot);
-        if (state.liveSelectedNodeId) {
-          highlightNode(state.liveSelectedNodeId);
+      if (restoredLiveSnapshot) {
+        updateGraph(restoredLiveSnapshot, { instantRender: true, restoreLive: true });
+        deps.restoreLiveVisualState?.();
+        if (restoredSelectedNodeId) {
+          highlightNode(restoredSelectedNodeId);
         }
+        setStatus(`Returned to live graph with ${restoredLiveSnapshot.nodes?.length || 0} nodes.`);
       }
       setState({ liveGraphSnapshot: null, liveSelectedNodeId: null });
       renderHistoryCommitInfo();
       deps.setHistoryStatus("Load a scanned git repo to begin.");
+      deps.renderHistoryDiff?.({
+        shortstat: "Click Show Diff to compare commits.",
+        changed_files: [],
+        from_commit: "",
+        to_commit: "",
+        truncated: false,
+      });
       syncHistoryButtons();
     }
 
@@ -175,26 +262,125 @@
       }
       if (state.historyPlaybackTimer) {
         deps.stopHistoryPlayback();
+        playbackLoopActive = false;
         syncHistoryButtons();
         return;
       }
-      const button = document.getElementById("history-play-btn");
-      if (button) {
-        button.textContent = "Pause Timeline";
-      }
-      const timer = setInterval(async () => {
-        const current = getState();
-        const nextIndex = current.historyIndex >= current.historyCommits.length - 1 ? 0 : current.historyIndex + 1;
-        await loadHistorySnapshot(nextIndex);
-      }, 1800);
-      setState({ historyPlaybackTimer: timer });
+
+      const stepDelay = Math.max(1800, Number(state.historyPlaybackDelay) || 7000);
+      playbackLoopActive = true;
+      const timerToken = Date.now();
+      setState({ historyPlaybackTimer: timerToken });
+      deps.setHistoryStatus(`Playing timeline at ${(stepDelay / 1000).toFixed(1)}s per commit.`);
+
+      const playbackLoop = async () => {
+        while (playbackLoopActive && getState().historyPlaybackTimer === timerToken) {
+          await new Promise((resolve) => setTimeout(resolve, Math.max(1800, Number(getState().historyPlaybackDelay) || 7000)));
+          const current = getState();
+          if (!playbackLoopActive || current.historyPlaybackTimer !== timerToken) {
+            break;
+          }
+          const nextIndex =
+            current.historyIndex >= current.historyCommits.length - 1 ? 0 : current.historyIndex + 1;
+          await loadHistorySnapshot(nextIndex);
+        }
+      };
+      playbackLoop();
       syncHistoryButtons();
+    }
+
+    function restartHistoryPlayback() {
+      const state = getState();
+      if (!state.historyPlaybackTimer) {
+        return;
+      }
+      playbackLoopActive = false;
+      deps.stopHistoryPlayback();
+      syncHistoryButtons();
+      toggleHistoryPlayback();
+    }
+
+    function stepHistory(direction) {
+      const state = getState();
+      if (!state.historyCommits.length) {
+        return;
+      }
+      const delta = direction < 0 ? -1 : 1;
+      const nextIndex = Math.max(0, Math.min(state.historyCommits.length - 1, state.historyIndex + delta));
+      loadHistorySnapshot(nextIndex);
+    }
+
+    async function loadHistoryDiff(options = {}) {
+      const silentStatus = Boolean(options.silentStatus);
+      const state = getState();
+      if (state.historyCommits.length < 2) {
+        deps.renderHistoryDiff?.({
+          shortstat: "Need at least two commits to view a diff.",
+          changed_files: [],
+          from_commit: "",
+          to_commit: "",
+          truncated: false,
+        });
+        return;
+      }
+
+      const toCommit = state.historyCommits[state.historyIndex];
+      const fromCommit = state.historyCommits[Math.max(0, state.historyIndex - 1)];
+      if (!toCommit || !fromCommit || toCommit.hash === fromCommit.hash) {
+        deps.renderHistoryDiff?.({
+          shortstat: "No earlier commit available for comparison.",
+          changed_files: [],
+          from_commit: fromCommit?.hash || "",
+          to_commit: toCommit?.hash || "",
+          truncated: false,
+        });
+        return;
+      }
+
+      if (!silentStatus) {
+        deps.setHistoryStatus(`Loading diff ${fromCommit.short_hash} -> ${toCommit.short_hash}...`);
+      }
+      try {
+        const candidateUrls = [
+          `/api/history-diff/${fromCommit.hash}/${toCommit.hash}`,
+          `/api/history/diff/${fromCommit.hash}/${toCommit.hash}`,
+        ];
+        let data = null;
+        let requestError = null;
+        for (const url of candidateUrls) {
+          const response = await fetch(url);
+          const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+          const payload = contentType.includes("application/json")
+            ? await response.json()
+            : { error: await response.text() };
+          if (response.ok) {
+            data = payload;
+            requestError = null;
+            break;
+          }
+          requestError = payload?.error || `Diff endpoint returned ${response.status}`;
+        }
+        if (!data) {
+          throw new Error(requestError || "Failed to load commit diff");
+        }
+        deps.renderHistoryDiff?.(data);
+        if (!silentStatus) {
+          deps.setHistoryStatus(`Diff loaded for ${fromCommit.short_hash} -> ${toCommit.short_hash}.`);
+        }
+      } catch (error) {
+        if (!silentStatus) {
+          deps.setHistoryStatus(error.message);
+        }
+      }
     }
 
     return {
       closeHistoryMode,
       loadHistorySnapshot,
+      loadHistoryDiff,
       openHistoryMode,
+      restartHistoryPlayback,
+      stepHistory,
       toggleHistoryPlayback,
     };
   }

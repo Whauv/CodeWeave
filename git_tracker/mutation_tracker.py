@@ -33,6 +33,25 @@ def _normalize_path(path_value: str | None, repo_root: Path) -> str:
     return str((repo_root / candidate).resolve())
 
 
+def _normalize_repo_relative_path(path_value: str | None, repo_root: Path) -> str:
+    if not path_value:
+        return ""
+    normalized = str(path_value).replace("\\", "/")
+    try:
+        candidate = Path(path_value)
+        if candidate.is_absolute():
+            return str(candidate.resolve().relative_to(repo_root.resolve())).replace("\\", "/")
+    except Exception:
+        pass
+    repo_name = repo_root.name
+    marker = f"/{repo_name}/"
+    lowered = normalized.lower()
+    marker_index = lowered.find(marker.lower())
+    if marker_index >= 0:
+        return normalized[marker_index + len(marker) :].lstrip("/").replace("\\", "/")
+    return normalized.lstrip("/").replace("\\", "/")
+
+
 def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     repo_root = Path(repo_path).resolve()
     if Repository is None:
@@ -44,7 +63,8 @@ def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[st
         return _mark_nodes_stable(nodes)
 
     file_map: dict[str, dict[str, Any]] = {}
-    recent_files: list[str] = []
+    recent_five_files: set[str] = set()
+    recent_thirty_files: set[str] = set()
 
     try:
         for commit_index, commit in enumerate(Repository(str(repo_root)).traverse_commits()):
@@ -57,7 +77,13 @@ def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[st
                     continue
 
                 normalized_path = _normalize_path(file_path, repo_root)
-                recent_files.append(normalized_path)
+                normalized_relative = _normalize_repo_relative_path(file_path, repo_root)
+                if commit_index < 5:
+                    recent_five_files.add(normalized_path)
+                    recent_five_files.add(normalized_relative)
+                if commit_index < 30:
+                    recent_thirty_files.add(normalized_path)
+                    recent_thirty_files.add(normalized_relative)
                 current = file_map.setdefault(
                     normalized_path,
                     {
@@ -73,6 +99,7 @@ def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[st
                 current["added_lines"] += getattr(modified_file, "added_lines", 0) or 0
                 current["complexity"] = getattr(modified_file, "complexity", 0) or 0
                 current["last_seen_index"] = min(current.get("last_seen_index", commit_index), commit_index)
+                file_map.setdefault(normalized_relative, current)
     except Exception as exc:
         LOGGER.warning("Unable to inspect git history for %s: %s", repo_path, exc)
         return _mark_nodes_stable(nodes)
@@ -80,12 +107,10 @@ def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[st
     if not file_map:
         return _mark_nodes_stable(nodes)
 
-    recent_five_files = set(recent_files[:5])
-    recent_thirty_files = set(recent_files[:30])
-
     for node in nodes:
         node_path = _normalize_path(node.get("file"), repo_root)
-        metadata = file_map.get(node_path)
+        node_relative_path = _normalize_repo_relative_path(node.get("file"), repo_root)
+        metadata = file_map.get(node_path) or file_map.get(node_relative_path)
         if metadata is None:
             node["mutation_status"] = "stable"
             node["mutation_color"] = "#aaaaaa"
@@ -97,10 +122,10 @@ def track_mutations(repo_path: str, nodes: list[dict[str, Any]]) -> list[dict[st
         if churn_count >= 5:
             mutation_status = "hotspot"
             mutation_color = "#ff4444"
-        elif node_path in recent_five_files:
+        elif node_path in recent_five_files or node_relative_path in recent_five_files:
             mutation_status = "new"
             mutation_color = "#00ff88"
-        elif node_path in recent_thirty_files:
+        elif node_path in recent_thirty_files or node_relative_path in recent_thirty_files:
             mutation_status = "modified"
             mutation_color = "#ffcc00"
         else:
