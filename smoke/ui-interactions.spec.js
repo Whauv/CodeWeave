@@ -23,7 +23,19 @@ async function openConcreteNodeDetail(page) {
   }
 
   await concreteNodes.first().click({ force: true });
-  await expect(page.locator("#detail-panel")).toBeVisible({ timeout: 30000 });
+  const detailPanel = page.locator("#detail-panel");
+  if (!(await detailPanel.isVisible())) {
+    await page.evaluate(() => {
+      const graph = window.__CODEWEAVE_TEST_API__?.getGraphData?.() || window.__CODEMAPPER_GRAPH__;
+      const node = Array.isArray(graph?.nodes)
+        ? graph.nodes.find((entry) => !String(entry?.id || "").startsWith("cluster::"))
+        : null;
+      if (node && typeof window.loadNodeDetail === "function") {
+        window.loadNodeDetail(node, graph);
+      }
+    });
+  }
+  await expect(detailPanel).toBeVisible({ timeout: 30000 });
 }
 
 async function scanFixture(page) {

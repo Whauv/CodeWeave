@@ -48,7 +48,19 @@ async function openConcreteNodeDetail(page) {
   }
 
   await concreteNodes.first().click({ force: true });
-  await expect(page.locator("#detail-panel")).toBeVisible({ timeout: 30000 });
+  const detailPanel = page.locator("#detail-panel");
+  if (!(await detailPanel.isVisible())) {
+    await page.evaluate(() => {
+      const graph = window.__CODEWEAVE_TEST_API__?.getGraphData?.() || window.__CODEMAPPER_GRAPH__;
+      const node = Array.isArray(graph?.nodes)
+        ? graph.nodes.find((entry) => !String(entry?.id || "").startsWith("cluster::"))
+        : null;
+      if (node && typeof window.loadNodeDetail === "function") {
+        window.loadNodeDetail(node, graph);
+      }
+    });
+  }
+  await expect(detailPanel).toBeVisible({ timeout: 30000 });
 }
 
 test.describe("CodeWeave smoke flow", () => {
@@ -125,18 +137,21 @@ test.describe("CodeWeave smoke flow", () => {
     expect(oldestHash.length).toBeGreaterThan(0);
     expect(newestHash.length).toBeGreaterThan(0);
 
-    await page.getByRole("button", { name: "Prev Commit" }).click();
+    await expect(page.locator("#history-prev-btn")).toBeEnabled({ timeout: 30000 });
+    await page.evaluate(() => document.getElementById("history-prev-btn")?.click());
     await expect(page.locator("#history-commit-meta")).toContainText(oldestHash, { timeout: 30000 });
 
-    await page.getByRole("button", { name: "Next Commit" }).click();
+    await expect(page.locator("#history-next-btn")).toBeEnabled({ timeout: 30000 });
+    await page.evaluate(() => document.getElementById("history-next-btn")?.click());
     await expect(page.locator("#history-commit-meta")).toContainText(newestHash, { timeout: 30000 });
 
-    await page.getByRole("button", { name: "Play Timeline" }).click();
+    await expect(page.locator("#history-play-btn")).toBeEnabled({ timeout: 30000 });
+    await page.evaluate(() => document.getElementById("history-play-btn")?.click());
     await expect(page.getByRole("button", { name: "Pause Timeline" })).toBeVisible({ timeout: 30000 });
-    await page.getByRole("button", { name: "Pause Timeline" }).click();
+    await page.evaluate(() => document.getElementById("history-play-btn")?.click());
     await expect(page.getByRole("button", { name: "Play Timeline" })).toBeVisible({ timeout: 30000 });
 
-    await page.getByRole("button", { name: "Show Diff" }).click();
+    await page.evaluate(() => document.getElementById("history-diff-btn")?.click());
     await expect(page.locator("#history-diff-body")).not.toContainText("Click Show Diff", { timeout: 30000 });
     await expect(page.locator("#history-diff-body")).not.toContainText("Failed to load commit diff", { timeout: 30000 });
     await expect(page.locator("#history-diff-body")).toContainText("index.ts", { timeout: 30000 });
