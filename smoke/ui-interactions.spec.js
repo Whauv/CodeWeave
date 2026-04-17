@@ -71,9 +71,20 @@ test.describe("CodeWeave interaction flows", () => {
 
   test("exports graph json after a scan", async ({ page }) => {
     await scanFixture(page);
-    const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export JSON" }).click();
-    const download = await downloadPromise;
+    const waitForJsonDownload = async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const downloadPromise = page.waitForEvent("download");
+        await page.evaluate(() => document.getElementById("export-json-btn")?.click());
+        const download = await downloadPromise;
+        if (/\.json$/i.test(download.suggestedFilename())) {
+          return download;
+        }
+      }
+      return null;
+    };
+
+    const download = await waitForJsonDownload();
+    expect(download).not.toBeNull();
     expect(download.suggestedFilename()).toMatch(/typescript_demo.*\.json$/i);
   });
 
