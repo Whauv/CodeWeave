@@ -132,18 +132,20 @@ test.describe("CodeWeave smoke flow", () => {
     await page.getByRole("button", { name: "Evolution" }).click();
     await expect(page.locator("#history-overlay")).toHaveClass(/visible/, { timeout: 30000 });
 
-    const initialMeta = (await page.locator("#history-commit-meta").textContent())?.trim() || "";
+    const historyCommitMeta = page.locator("#history-commit-meta");
+    await expect(historyCommitMeta).toContainText("commits available", { timeout: 30000 });
+    const initialMeta = (await historyCommitMeta.textContent())?.trim() || "";
     expect(initialMeta.length).toBeGreaterThan(0);
 
     await expect(page.locator("#history-prev-btn")).toBeEnabled({ timeout: 30000 });
     await page.evaluate(() => document.getElementById("history-prev-btn")?.click());
-    await expect(page.locator("#history-commit-meta")).not.toHaveText(initialMeta, { timeout: 30000 });
-    const previousMeta = (await page.locator("#history-commit-meta").textContent())?.trim() || "";
+    await expect(historyCommitMeta).not.toHaveText(initialMeta, { timeout: 30000 });
+    const previousMeta = (await historyCommitMeta.textContent())?.trim() || "";
     expect(previousMeta.length).toBeGreaterThan(0);
 
     await expect(page.locator("#history-next-btn")).toBeEnabled({ timeout: 30000 });
     await page.evaluate(() => document.getElementById("history-next-btn")?.click());
-    await expect(page.locator("#history-commit-meta")).toHaveText(initialMeta, { timeout: 30000 });
+    await expect(historyCommitMeta).toHaveText(initialMeta, { timeout: 30000 });
 
     await expect(page.locator("#history-play-btn")).toBeEnabled({ timeout: 30000 });
     await page.evaluate(() => document.getElementById("history-play-btn")?.click());
