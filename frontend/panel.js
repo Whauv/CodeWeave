@@ -30,7 +30,7 @@ function getSelectedGraphNode() {
 }
 
 function resolveActionPlanNode() {
-  return getActiveDetailNode() || getSelectedGraphNode();
+  return getActiveDetailNode() || getSelectedGraphNode() || lastDetailNodeSnapshot;
 }
 
 let activeChatNodeId = null;
@@ -38,6 +38,7 @@ let chatSessions = [];
 let activeChatSessionId = null;
 let isChatRequestInFlight = false;
 let activeActionPlan = null;
+let lastDetailNodeSnapshot = null;
 const DEFAULT_CHAT_PROVIDER = "groq";
 const CHAT_STORAGE_KEY = "codeweave-chat-sessions-v1";
 
@@ -52,6 +53,7 @@ function getChatElements() {
     sendButton: document.getElementById("chat-send-btn"),
     hint: document.getElementById("chat-hint"),
     newButton: document.getElementById("chat-new-btn"),
+    clearAllButton: document.getElementById("chat-clear-all-btn"),
     sessionBar: document.getElementById("chat-session-bar"),
   };
 }
@@ -359,9 +361,18 @@ function createNewChatFromCurrentContext() {
   return session;
 }
 
+function clearAllChatSessions() {
+  chatSessions = [];
+  activeChatSessionId = null;
+  activeChatNodeId = null;
+  persistChatSessions();
+  renderChatSessions();
+  renderChatMessages();
+}
+
 function initializeChatUi() {
-  const { input, sendButton, newButton } = getChatElements();
-  if (!input || !sendButton || !newButton) {
+  const { input, sendButton, newButton, clearAllButton } = getChatElements();
+  if (!input || !sendButton || !newButton || !clearAllButton) {
     return;
   }
 
@@ -373,6 +384,7 @@ function initializeChatUi() {
 
   sendButton.addEventListener("click", submitChatMessage);
   newButton.addEventListener("click", createNewChatFromCurrentContext);
+  clearAllButton.addEventListener("click", clearAllChatSessions);
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -420,6 +432,25 @@ function renderActionPlan(plan) {
   }
 }
 
+async function ensureServerGraphCache() {
+  const target = String(window.__CODEWEAVE_SCAN_TARGET__ || "").trim();
+  if (!target) {
+    return false;
+  }
+  const language =
+    document.getElementById("language-input")?.value?.trim() || "python";
+  const response = await fetch("/api/scan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: target, language }),
+  });
+  if (!response.ok) {
+    const payload = await response.text();
+    throw new Error(payload || "Failed to restore server graph cache.");
+  }
+  return true;
+}
+
 async function generateActionPlan() {
   const node = resolveActionPlanNode();
   if (!node) {
@@ -445,13 +476,44 @@ async function generateActionPlan() {
     let payload = null;
     let requestError = null;
     for (const url of candidateUrls) {
-      const response = await fetch(url);
+      let response = await fetch(url);
       const rawText = await response.text();
       let parsed = null;
       try {
         parsed = rawText ? JSON.parse(rawText) : {};
       } catch (_parseError) {
         parsed = null;
+      }
+      const isNoGraphError =
+        !response.ok &&
+        String(
+          (parsed && typeof parsed === "object" && parsed.error) || rawText || ""
+        ).toLowerCase().includes("no graph scanned yet");
+      if (isNoGraphError) {
+        try {
+          await ensureServerGraphCache();
+          response = await fetch(url);
+          const retryText = await response.text();
+          try {
+            parsed = retryText ? JSON.parse(retryText) : {};
+          } catch (_retryParseError) {
+            parsed = null;
+          }
+          if (response.ok) {
+            payload = parsed && typeof parsed === "object" ? parsed : null;
+            requestError = null;
+            break;
+          }
+          const retryPreview = String(retryText || "").replace(/\s+/g, " ").trim().slice(0, 220);
+          requestError =
+            (parsed && typeof parsed === "object" && parsed.error) ||
+            retryPreview ||
+            `Failed to generate action plan (${response.status})`;
+          continue;
+        } catch (restoreError) {
+          requestError = restoreError.message || "Could not rebuild server graph cache.";
+          continue;
+        }
       }
       if (response.ok) {
         payload = parsed && typeof parsed === "object" ? parsed : null;
@@ -583,6 +645,17 @@ function ensureDetailPanelVisible() {
   }
 }
 
+function setDetailActionButtonsEnabled(enabled) {
+  const blastButton = document.getElementById("simulate-blast-btn");
+  const sourceButton = document.getElementById("view-source-btn");
+  if (blastButton) {
+    blastButton.disabled = !enabled;
+  }
+  if (sourceButton) {
+    sourceButton.disabled = !enabled;
+  }
+}
+
 async function loadNodeDetail(node, graphData) {
   if (!node) {
     return;
@@ -593,6 +666,8 @@ async function loadNodeDetail(node, graphData) {
     }
     ensureDetailPanelVisible();
     setActiveDetailNodeId(node.id);
+    lastDetailNodeSnapshot = { ...node };
+    setDetailActionButtonsEnabled(true);
 
     const nameEl = document.getElementById("node-name");
     const fileEl = document.getElementById("node-file");
@@ -623,6 +698,7 @@ async function loadNodeDetail(node, graphData) {
     if (!response.ok) {
       throw new Error(data.error || "Failed to load node details");
     }
+    lastDetailNodeSnapshot = { ...data };
 
     if (nameEl) {
       nameEl.textContent = data.name || "Unknown Node";
@@ -725,14 +801,21 @@ function hidePanel() {
   document.getElementById("detail-panel").classList.add("hidden");
   document.getElementById("detail-shell").classList.add("hidden");
   setActiveDetailNodeId(null);
+  lastDetailNodeSnapshot = null;
+  setDetailActionButtonsEnabled(false);
   renderActionPlan(null);
 }
 
 function bindDetailPanelActions() {
   document.getElementById("simulate-blast-btn")?.addEventListener("click", () => {
-    const node = getActiveDetailNode();
+    const node = resolveActionPlanNode();
     if (node && window.triggerBlastRadius) {
       window.triggerBlastRadius(node);
+      return;
+    }
+    const blastInfo = document.getElementById("blast-info");
+    if (blastInfo) {
+      blastInfo.innerHTML = `<div class="muted">Select a node first, then click Simulate Blast Radius.</div>`;
     }
   });
   document.getElementById("clear-blast-btn")?.addEventListener("click", () => {

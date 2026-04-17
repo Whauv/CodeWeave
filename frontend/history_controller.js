@@ -16,10 +16,23 @@
     let previousSnapshot = null;
 
     function normalizePathTail(pathValue) {
-      const normalized = String(pathValue || "").replace(/\\/g, "/").toLowerCase();
+      const normalized = String(pathValue || "").replace(/\\/g, "/").toLowerCase().trim();
       const parts = normalized.split("/").filter(Boolean);
       if (!parts.length) {
         return "";
+      }
+      const snapshotMarkers = new Set([".codeweave_tmp", "history_snapshots_runtime", "codeweave_repo_cache", "repo"]);
+      for (let index = 0; index < parts.length; index += 1) {
+        const part = parts[index];
+        if (snapshotMarkers.has(part) && index < parts.length - 1) {
+          if (part === "repo") {
+            return parts.slice(index + 1).join("/");
+          }
+          if (index + 2 < parts.length) {
+            return parts.slice(index + 2).join("/");
+          }
+          return parts.slice(index + 1).join("/");
+        }
       }
       return parts.slice(-4).join("/");
     }
@@ -98,16 +111,6 @@
       const updatedIds = new Set(transition?.updated || []);
       const coloredNodes = (snapshot.nodes || []).map((node) => {
         const nextNode = { ...node };
-        if (addedIds.has(node.id)) {
-          nextNode.mutation_status = "new";
-          nextNode.mutation_color = "#00ff88";
-          return nextNode;
-        }
-        if (updatedIds.has(node.id)) {
-          nextNode.mutation_status = "modified";
-          nextNode.mutation_color = "#ffcc00";
-          return nextNode;
-        }
 
         const strictMatch = byStrict.get(getNodeIdentity(node));
         const looseMatch = byLoose.get(getNodeIdentityLoose(node));
@@ -117,6 +120,12 @@
         if (liveMatch?.mutation_color) {
           nextNode.mutation_color = liveMatch.mutation_color;
           nextNode.mutation_status = liveMatch.mutation_status || nextNode.mutation_status || "stable";
+        } else if (updatedIds.has(node.id)) {
+          nextNode.mutation_status = "modified";
+          nextNode.mutation_color = "#ffcc00";
+        } else if (addedIds.has(node.id)) {
+          nextNode.mutation_status = "stable";
+          nextNode.mutation_color = "#aaaaaa";
         } else if (!nextNode.mutation_color) {
           nextNode.mutation_status = nextNode.mutation_status || "stable";
           nextNode.mutation_color = "#aaaaaa";

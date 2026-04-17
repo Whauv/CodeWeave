@@ -8,12 +8,12 @@ import networkx as nx
 
 def _color_for_depth(depth: int) -> str:
     if depth <= 1:
-        return "#ff2222"
+        return "#a855f7"
     if depth == 2:
-        return "#ff6644"
+        return "#c084fc"
     if depth == 3:
-        return "#ff9966"
-    return "#ffccaa"
+        return "#d8b4fe"
+    return "#e9d5ff"
 
 
 def compute_blast_radius(graph_data: dict[str, Any], node_id: str) -> dict[str, Any]:
