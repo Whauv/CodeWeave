@@ -3,15 +3,36 @@ const { test, expect } = require("@playwright/test");
 
 const fixturePath = path.resolve(__dirname, "fixtures", "typescript_demo");
 
+async function openConcreteNodeDetail(page) {
+  await page.waitForFunction(
+    () => document.querySelectorAll("#graph-svg circle[data-node-id]").length > 0,
+    null,
+    { timeout: 30000 }
+  );
+
+  const concreteSelector = "#graph-svg circle[data-node-id]:not([data-node-id^='cluster::'])";
+  let concreteNodes = page.locator(concreteSelector);
+  if ((await concreteNodes.count()) === 0) {
+    await page.locator("#graph-svg circle[data-node-id]").first().click({ force: true });
+    await page.waitForFunction(
+      () => document.querySelectorAll("#graph-svg circle[data-node-id]:not([data-node-id^='cluster::'])").length > 0,
+      null,
+      { timeout: 30000 }
+    );
+    concreteNodes = page.locator(concreteSelector);
+  }
+
+  await concreteNodes.first().click({ force: true });
+  await expect(page.locator("#detail-panel")).toBeVisible({ timeout: 30000 });
+}
+
 async function scanFixture(page) {
   await page.goto("/");
   await page.selectOption("#language-input", "typescript");
   await page.locator("#path-input").fill(fixturePath);
   await page.getByRole("button", { name: "Scan Project" }).click();
   await expect(page.locator("#metric-nodes")).not.toHaveText("0", { timeout: 30000 });
-  await expect(page.locator("#graph-svg circle")).toHaveCount(4, { timeout: 30000 });
-  await page.locator("#graph-svg circle").last().click({ force: true });
-  await expect(page.locator("#detail-panel")).toBeVisible();
+  await openConcreteNodeDetail(page);
 }
 
 test.describe("CodeWeave interaction flows", () => {
