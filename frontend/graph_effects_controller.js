@@ -135,7 +135,7 @@
         .attr("opacity", (node) => (affected.has(node.id) ? 1 : 0.12))
         .attr("stroke", (node) => {
           if (node.id === data.epicenter) {
-            return "#fff5d6";
+            return "#f3e8ff";
           }
           return node.id === getSelectedNodeId() ? palette.nodeSelected : palette.nodeStroke;
         });
@@ -144,7 +144,7 @@
         .attr("opacity", (link) => (affected.has(link.source.id) && affected.has(link.target.id) ? 0.95 : 0.05))
         .attr("stroke", (link) => {
           if (affected.has(link.source.id) && affected.has(link.target.id)) {
-            return "rgba(255, 190, 137, 0.65)";
+            return "rgba(168, 85, 247, 0.72)";
           }
           return getLayoutMode() === "tree" ? palette.linkTreeMuted : palette.linkForce;
         });

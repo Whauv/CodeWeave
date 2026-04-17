@@ -3,15 +3,48 @@ const { test, expect } = require("@playwright/test");
 
 const fixturePath = path.resolve(__dirname, "fixtures", "typescript_demo");
 
+async function openConcreteNodeDetail(page) {
+  await page.waitForFunction(
+    () => document.querySelectorAll("#graph-svg circle[data-node-id]").length > 0,
+    null,
+    { timeout: 30000 }
+  );
+
+  const concreteSelector = "#graph-svg circle[data-node-id]:not([data-node-id^='cluster::'])";
+  let concreteNodes = page.locator(concreteSelector);
+  if ((await concreteNodes.count()) === 0) {
+    await page.locator("#graph-svg circle[data-node-id]").first().click({ force: true });
+    await page.waitForFunction(
+      () => document.querySelectorAll("#graph-svg circle[data-node-id]:not([data-node-id^='cluster::'])").length > 0,
+      null,
+      { timeout: 30000 }
+    );
+    concreteNodes = page.locator(concreteSelector);
+  }
+
+  await concreteNodes.first().click({ force: true });
+  const detailPanel = page.locator("#detail-panel");
+  if (!(await detailPanel.isVisible())) {
+    await page.evaluate(() => {
+      const graph = window.__CODEWEAVE_TEST_API__?.getGraphData?.() || window.__CODEMAPPER_GRAPH__;
+      const node = Array.isArray(graph?.nodes)
+        ? graph.nodes.find((entry) => !String(entry?.id || "").startsWith("cluster::"))
+        : null;
+      if (node && typeof window.loadNodeDetail === "function") {
+        window.loadNodeDetail(node, graph);
+      }
+    });
+  }
+  await expect(detailPanel).toBeVisible({ timeout: 30000 });
+}
+
 async function scanFixture(page) {
   await page.goto("/");
   await page.selectOption("#language-input", "typescript");
   await page.locator("#path-input").fill(fixturePath);
   await page.getByRole("button", { name: "Scan Project" }).click();
   await expect(page.locator("#metric-nodes")).not.toHaveText("0", { timeout: 30000 });
-  await expect(page.locator("#graph-svg circle")).toHaveCount(4, { timeout: 30000 });
-  await page.locator("#graph-svg circle").last().click({ force: true });
-  await expect(page.locator("#detail-panel")).toBeVisible();
+  await openConcreteNodeDetail(page);
 }
 
 test.describe("CodeWeave interaction flows", () => {

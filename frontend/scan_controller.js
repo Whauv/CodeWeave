@@ -22,6 +22,21 @@
       return setState(nextState);
     }
 
+    function resetScanMetrics() {
+      const nodes = getDom("metric-nodes");
+      const edges = getDom("metric-edges");
+      const selected = getDom("metric-selected");
+      if (nodes) {
+        nodes.textContent = "0";
+      }
+      if (edges) {
+        edges.textContent = "0";
+      }
+      if (selected) {
+        selected.textContent = "None";
+      }
+    }
+
     function setScanOverlayMessage(message) {
       const element = getDom("scan-overlay-copy");
       if (element) {
@@ -217,6 +232,7 @@
         getDom("history-overlay")?.classList.remove("visible");
         setStatus(`Scanning ${state.currentLanguage} project...`);
         setMode("Scan");
+        resetScanMetrics();
         showScanOverlay();
 
         const response = await fetch("/api/scan", {

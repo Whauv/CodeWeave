@@ -130,7 +130,11 @@
 
     function syncActionButtons() {
       const state = getState();
-      const hasSelection = Boolean(getSelectedNode() || getActiveDetailNode?.());
+      const hasSelection = Boolean(
+        getSelectedNode() ||
+        getActiveDetailNode?.() ||
+        globalScope.__CODEWEAVE_ACTIVE_DETAIL_NODE_ID__
+      );
       const blastButton = getDom("simulate-blast-btn");
       if (blastButton) {
         blastButton.disabled = !hasSelection || state.blastRequestInFlight;

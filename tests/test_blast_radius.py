@@ -26,8 +26,8 @@ class BlastRadiusTests(unittest.TestCase):
         result = compute_blast_radius(graph_data, "a")
         self.assertEqual(result["depth_map"]["b"], 1)
         self.assertEqual(result["depth_map"]["c"], 2)
-        self.assertEqual(result["risk_colors"]["b"], "#ff2222")
-        self.assertEqual(result["risk_colors"]["c"], "#ff6644")
+        self.assertEqual(result["risk_colors"]["b"], "#a855f7")
+        self.assertEqual(result["risk_colors"]["c"], "#c084fc")
 
 
 if __name__ == "__main__":

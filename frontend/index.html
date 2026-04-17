@@ -1282,15 +1282,15 @@
 
     @keyframes epicenterPulse {
       0% {
-        filter: drop-shadow(0 0 4px rgba(255, 91, 77, 0.3));
+        filter: drop-shadow(0 0 4px rgba(168, 85, 247, 0.3));
       }
 
       50% {
-        filter: drop-shadow(0 0 14px rgba(255, 91, 77, 0.95));
+        filter: drop-shadow(0 0 14px rgba(168, 85, 247, 0.95));
       }
 
       100% {
-        filter: drop-shadow(0 0 4px rgba(255, 91, 77, 0.3));
+        filter: drop-shadow(0 0 4px rgba(168, 85, 247, 0.3));
       }
     }
 
@@ -1347,6 +1347,12 @@
       font-size: 0.88rem;
       color: var(--muted);
       font-weight: 600;
+    }
+
+    .chat-toolbar-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .chat-session-bar {
@@ -1999,7 +2005,10 @@
             <div class="chat-shell">
               <div class="chat-toolbar">
                 <div class="chat-toolbar-title">Saved chats</div>
-                <button id="chat-new-btn" class="panel-action">New Chat</button>
+                <div class="chat-toolbar-actions">
+                  <button id="chat-clear-all-btn" class="panel-action">Clear All</button>
+                  <button id="chat-new-btn" class="panel-action">New Chat</button>
+                </div>
               </div>
               <div id="chat-session-bar" class="chat-session-bar">
                 <div class="chat-session-empty">Your saved chat threads will appear here.</div>
