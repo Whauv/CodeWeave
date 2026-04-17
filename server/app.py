@@ -300,5 +300,6 @@ def serve_frontend_asset(asset_path: str) -> Any:
 
 
 if __name__ == "__main__":
-    debug_enabled = os.getenv("FLASK_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
-    app.run(host="0.0.0.0", port=5050, debug=debug_enabled, use_reloader=False)
+    debug_enabled = os.getenv("FLASK_DEBUG", "false").strip().lower() in {"1", "true", "yes", "on"}
+    port = int(os.getenv("PORT", "5050"))
+    app.run(host="0.0.0.0", port=port, debug=debug_enabled, use_reloader=False)
