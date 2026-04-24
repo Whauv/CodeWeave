@@ -18,9 +18,13 @@
       onLoadMore,
       onShowAll,
       onStopBuild,
+      onResetGraphView,
       onTreeLayout,
       onForceLayout,
       onToggleCluster,
+      onToggleEdgeLabels,
+      onSetGraphSpacing,
+      onSetNeighborDepth,
       onOpenHistory,
       onCloseHistory,
       onToggleHistoryPlayback,
@@ -45,6 +49,8 @@
       document.body.dataset.theme = nextTheme;
       getDom("theme-light-btn")?.classList.toggle("active", nextTheme === "light");
       getDom("theme-dark-btn")?.classList.toggle("active", nextTheme === "dark");
+      getDom("top-theme-light-btn")?.classList.toggle("active", nextTheme === "light");
+      getDom("top-theme-dark-btn")?.classList.toggle("active", nextTheme === "dark");
       if (persist) {
         localStorage.setItem(getStorageKeys().theme, nextTheme);
       }
@@ -140,6 +146,25 @@
       }
       getDom("view-source-btn").disabled = !hasSelection;
       getDom("cluster-toggle-btn")?.classList.toggle("active", state.clusterMode);
+      getDom("edge-label-toggle-btn")?.classList.toggle("active", Boolean(state.edgeLabelsEnabled));
+      const depthValue = Math.max(1, Math.min(3, Number(state.neighborDepth) || 2));
+      const depthRange = getDom("neighbor-depth-range");
+      if (depthRange) {
+        depthRange.value = String(depthValue);
+      }
+      const depthLabel = getDom("neighbor-depth-value");
+      if (depthLabel) {
+        depthLabel.textContent = String(depthValue);
+      }
+      const spacing = Math.max(0.8, Math.min(1.6, Number(state.graphSpacing) || 1));
+      const spacingRange = getDom("graph-spacing-range");
+      if (spacingRange) {
+        spacingRange.value = spacing.toFixed(1);
+      }
+      const spacingLabel = getDom("graph-spacing-value");
+      if (spacingLabel) {
+        spacingLabel.textContent = spacing.toFixed(1);
+      }
       getDom("tree-layout-btn")?.classList.toggle("active", state.layoutMode === "tree");
       getDom("force-layout-btn")?.classList.toggle("active", state.layoutMode === "force");
     }
@@ -266,6 +291,18 @@
       getDom("tree-layout-btn")?.addEventListener("click", onTreeLayout);
       getDom("force-layout-btn")?.addEventListener("click", onForceLayout);
       getDom("cluster-toggle-btn")?.addEventListener("click", onToggleCluster);
+      getDom("edge-label-toggle-btn")?.addEventListener("click", onToggleEdgeLabels);
+      getDom("neighbor-depth-range")?.addEventListener("input", (event) => {
+        const nextDepth = Number(event.target.value || 2);
+        onSetNeighborDepth?.(nextDepth);
+        syncActionButtons();
+      });
+      getDom("graph-spacing-range")?.addEventListener("input", (event) => {
+        const nextSpacing = Number(event.target.value || 1);
+        onSetGraphSpacing?.(nextSpacing);
+        syncActionButtons();
+      });
+      getDom("reset-view-btn")?.addEventListener("click", onResetGraphView);
       getDom("history-btn")?.addEventListener("click", onOpenHistory);
       getDom("history-close-btn")?.addEventListener("click", onCloseHistory);
       getDom("history-live-btn")?.addEventListener("click", onCloseHistory);
@@ -292,6 +329,8 @@
       };
       getDom("theme-light-btn")?.addEventListener("click", () => applyAndRenderTheme("light"));
       getDom("theme-dark-btn")?.addEventListener("click", () => applyAndRenderTheme("dark"));
+      getDom("top-theme-light-btn")?.addEventListener("click", () => applyAndRenderTheme("light"));
+      getDom("top-theme-dark-btn")?.addEventListener("click", () => applyAndRenderTheme("dark"));
       getDom("theme-toggle-btn")?.addEventListener("click", () => {
         applyAndRenderTheme(getState().themeMode === "dark" ? "light" : "dark");
       });

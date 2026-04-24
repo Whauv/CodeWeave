@@ -96,7 +96,7 @@ test.describe("CodeWeave smoke flow", () => {
 
   test("persists theme and recent scan history across reloads", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: "Light Theme" }).click();
+    await page.locator("#theme-light-btn").click();
     await expect(page.locator("body")).toHaveAttribute("data-theme", "light");
 
     await page.selectOption("#language-input", "typescript");

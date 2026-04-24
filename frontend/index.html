@@ -930,6 +930,25 @@
       font-size: 0.86rem;
     }
 
+    .toolbar-inline-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--muted);
+      font-size: 0.8rem;
+      pointer-events: auto;
+    }
+
+    .toolbar-inline-control input[type="range"] {
+      width: 92px;
+      accent-color: var(--accent);
+    }
+
     .graph-progress-pill strong {
       color: var(--text);
       margin-left: 6px;
@@ -1829,6 +1848,8 @@
           <button id="view-split-btn" class="ghost-btn active">Split View</button>
           <button id="view-graph-btn" class="ghost-btn">Graph Focus</button>
           <button id="view-panel-btn" class="ghost-btn">Prompt Focus</button>
+          <button id="top-theme-light-btn" class="ghost-btn">Light Theme</button>
+          <button id="top-theme-dark-btn" class="ghost-btn active">Dark Theme</button>
         </div>
 
         <div class="scan-history-shell">
@@ -1868,6 +1889,18 @@
             <button id="history-btn" class="ghost-btn">Evolution</button>
             <button id="theme-light-btn" class="ghost-btn">Light Theme</button>
             <button id="theme-dark-btn" class="ghost-btn active">Dark Theme</button>
+            <button id="edge-label-toggle-btn" class="ghost-btn">Edge Labels</button>
+            <label class="toolbar-inline-control" for="neighbor-depth-range">
+              <span>Depth</span>
+              <input id="neighbor-depth-range" type="range" min="1" max="3" step="1" value="2" />
+              <strong id="neighbor-depth-value">2</strong>
+            </label>
+            <label class="toolbar-inline-control" for="graph-spacing-range">
+              <span>Spacing</span>
+              <input id="graph-spacing-range" type="range" min="0.8" max="1.6" step="0.1" value="1.0" />
+              <strong id="graph-spacing-value">1.0</strong>
+            </label>
+            <button id="reset-view-btn" class="ghost-btn">Reset View</button>
             <button id="stop-build-btn" class="ghost-btn">Stop Build</button>
             <button id="graph-load-more-btn" class="ghost-btn">Load More</button>
             <button id="graph-show-all-btn" class="ghost-btn">Show All</button>
@@ -1885,6 +1918,7 @@
                 class="legend-name">Hotspot</span><span>high churn</span></div>
             <div class="legend-row"><span class="legend-dot" style="background:#aaaaaa;"></span><span
                 class="legend-name">Stable</span><span>no recent activity</span></div>
+            <div id="focus-badge" class="graph-progress-pill">Focus OFF</div>
             <div id="graph-progress-pill" class="graph-progress-pill">Visible<strong>0 / 0</strong></div>
           </div>
         </div>
