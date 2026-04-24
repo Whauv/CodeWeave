@@ -14,14 +14,20 @@ from urllib.parse import urlparse
 
 LOGGER = logging.getLogger(__name__)
 SNAPSHOT_TEMP_ROOT = Path(__file__).resolve().parents[1] / "history_snapshots_runtime"
+DEFAULT_ALLOWED_GITHUB_HOSTS = {"github.com", "www.github.com"}
+MAX_ARCHIVE_MEMBER_SIZE_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_TOTAL_SIZE_BYTES = 512 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 50000
 
 
-def normalize_github_repo_url(url_value: str) -> str:
+def normalize_github_repo_url(url_value: str, allowed_hosts: set[str] | None = None) -> str:
+    allowed_host_values = {host.lower().strip() for host in (allowed_hosts or DEFAULT_ALLOWED_GITHUB_HOSTS) if host.strip()}
     parsed = urlparse(url_value.strip())
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("GitHub URL must start with http:// or https://")
-    if parsed.netloc.lower() not in {"github.com", "www.github.com"}:
-        raise ValueError("Only github.com URLs are supported")
+    if parsed.netloc.lower() not in allowed_host_values:
+        hosts = ", ".join(sorted(allowed_host_values))
+        raise ValueError(f"Only approved Git hosts are supported: {hosts}")
 
     path_parts = [segment for segment in parsed.path.split("/") if segment]
     if len(path_parts) < 2:
@@ -116,14 +122,34 @@ def ensure_cached_repo(repo_url: str, include_all_branches: bool = False) -> Pat
     return clone_github_repo(repo_url, target_dir, include_all_branches=include_all_branches)
 
 
-def resolve_scan_source(project_input: str, include_all_branches: bool = False) -> tuple[Path, str, str]:
-    if project_input.startswith(("http://", "https://")):
-        repo_url = normalize_github_repo_url(project_input)
-        clone_path = ensure_cached_repo(repo_url, include_all_branches=include_all_branches)
-        return clone_path, repo_url, "github"
+def _is_within_root(candidate: Path, allowed_root: Path) -> bool:
+    candidate_resolved = candidate.resolve()
+    root_resolved = allowed_root.resolve()
+    return candidate_resolved == root_resolved or root_resolved in candidate_resolved.parents
+
+
+def validate_local_scan_path(project_input: str, allowed_local_roots: list[Path] | None = None) -> Path:
     resolved_path = Path(project_input).expanduser().resolve()
     if not resolved_path.exists() or not resolved_path.is_dir():
         raise ValueError("Invalid project path")
+    if allowed_local_roots:
+        if not any(_is_within_root(resolved_path, root) for root in allowed_local_roots):
+            allowed_roots_text = ", ".join(sorted(str(path.resolve()) for path in allowed_local_roots))
+            raise ValueError(f"Local scan path is not within allowed roots: {allowed_roots_text}")
+    return resolved_path
+
+
+def resolve_scan_source(
+    project_input: str,
+    include_all_branches: bool = False,
+    allowed_local_roots: list[Path] | None = None,
+    allowed_github_hosts: set[str] | None = None,
+) -> tuple[Path, str, str]:
+    if project_input.startswith(("http://", "https://")):
+        repo_url = normalize_github_repo_url(project_input, allowed_hosts=allowed_github_hosts)
+        clone_path = ensure_cached_repo(repo_url, include_all_branches=include_all_branches)
+        return clone_path, repo_url, "github"
+    resolved_path = validate_local_scan_path(project_input, allowed_local_roots=allowed_local_roots)
     return resolved_path, str(resolved_path), "local"
 
 
@@ -328,7 +354,21 @@ def diff_commits(
 
 def _safe_extract_tar(tar_file: tarfile.TarFile, destination: Path) -> None:
     destination = destination.resolve()
+    total_size = 0
+    member_count = 0
     for member in tar_file.getmembers():
+        member_count += 1
+        if member_count > MAX_ARCHIVE_MEMBERS:
+            raise ValueError("Commit snapshot archive has too many files")
+        if member.issym() or member.islnk():
+            raise ValueError("Commit snapshot archive contains links, which are not allowed")
+        if member.ischr() or member.isblk() or member.isfifo() or member.isdev():
+            raise ValueError("Commit snapshot archive contains unsupported special files")
+        if member.size > MAX_ARCHIVE_MEMBER_SIZE_BYTES:
+            raise ValueError("Commit snapshot archive contains a file that is too large")
+        total_size += member.size
+        if total_size > MAX_ARCHIVE_TOTAL_SIZE_BYTES:
+            raise ValueError("Commit snapshot archive is too large")
         member_path = (destination / member.name).resolve()
         if destination not in member_path.parents and member_path != destination:
             raise ValueError("Unsafe archive member detected while extracting commit snapshot")

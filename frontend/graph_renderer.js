@@ -168,7 +168,7 @@
       const visibleLeafCount = Math.max(1, hierarchyRoot.children?.reduce((sum, child) => sum + (child.data.leafWeight || 1), 0) || 1);
       const maxDepth = Math.max(1, ...nodes.map((node) => depthMap.get(node.id) || 0));
       const horizontalGap = Math.max(150, Math.min(280, Math.floor((width - 220) / Math.max(1, maxDepth))));
-      const verticalGap = visibleLeafCount > 260 ? 14 : visibleLeafCount > 180 ? 18 : visibleLeafCount > 110 ? 23 : 30;
+      const verticalGap = visibleLeafCount > 260 ? 20 : visibleLeafCount > 180 ? 24 : visibleLeafCount > 110 ? 30 : 36;
 
       const treeLayout = d3
         .tree()
@@ -223,7 +223,7 @@
             previousNode = node;
             return;
           }
-          const minimumGap = Math.max(24, getNodeRadius(previousNode) + getNodeRadius(node) + 8);
+          const minimumGap = Math.max(34, getNodeRadius(previousNode) + getNodeRadius(node) + 18);
           const desiredY = (previousNode.y || 0) + minimumGap;
           if ((node.y || 0) < desiredY) {
             node.y = desiredY;
@@ -808,10 +808,10 @@
       const nodeTransition = d3.transition().duration(420).ease(d3.easeBackOut.overshoot(1.1));
       const simulation = d3
         .forceSimulation(nodes)
-        .force("link", d3.forceLink(links).id((node) => node.id).distance((link) => link.source.isCluster || link.target.isCluster ? 160 : 120))
-        .force("charge", d3.forceManyBody().strength((node) => node.isCluster ? -520 : -300))
+        .force("link", d3.forceLink(links).id((node) => node.id).distance((link) => link.source.isCluster || link.target.isCluster ? 200 : 155))
+        .force("charge", d3.forceManyBody().strength((node) => node.isCluster ? -620 : -380))
         .force("center", d3.forceCenter(width / 2, height / 2))
-        .force("collide", d3.forceCollide().radius((node) => getNodeRadius(node) + 12))
+        .force("collide", d3.forceCollide().radius((node) => getNodeRadius(node) + 20))
         .alphaDecay(0.08)
         .velocityDecay(0.45);
 

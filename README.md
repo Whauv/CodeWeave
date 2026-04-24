@@ -140,6 +140,58 @@ For the most stable local startup, use the project virtualenv:
 .venv\Scripts\python server\app.py
 ```
 
+## Production Operations
+
+CodeWeave now includes production-focused API and operational primitives:
+
+- `\/api\/v1\/...` endpoints in parallel with legacy `\/api\/...` routes
+- async job endpoints for heavy work:
+  - `POST /api/v1/jobs/scan`
+  - `POST /api/v1/jobs/history-snapshot`
+  - `GET /api/v1/jobs/<job_id>`
+  - `GET /api/v1/jobs/<job_id>/result`
+- health probes:
+  - `GET /health/live`
+  - `GET /health/ready`
+- structured logging with correlation:
+  - request id from `X-Request-Id` (generated when missing)
+  - user identity from auth/header context
+
+### Auth And Rate Limits
+
+Hosted auth and rate limiting are enabled for heavy endpoints (`scan`, `chat`, `history*`).
+
+Environment variables:
+
+- `CODEWEAVE_AUTH_MODE`:
+  - `off` (default): no token required
+  - `token`: requires `Authorization: Bearer <token>`
+- `CODEWEAVE_API_TOKENS`: comma-separated allowed tokens when `CODEWEAVE_AUTH_MODE=token`
+- `CODEWEAVE_RATE_LIMIT_SCAN` (default `10`)
+- `CODEWEAVE_RATE_LIMIT_CHAT` (default `20`)
+- `CODEWEAVE_RATE_LIMIT_HISTORY` (default `30`)
+- `CODEWEAVE_RATE_LIMIT_WINDOW` seconds (default `60`)
+
+### Scan Target Allowlist Controls
+
+- `CODEWEAVE_ALLOWED_LOCAL_ROOTS`: OS path-separated roots allowed for local scans
+  - Windows example: `C:\\repos;D:\\workspaces`
+- `CODEWEAVE_ALLOWED_GITHUB_HOSTS`: comma-separated approved hosts
+  - example: `github.com,www.github.com`
+
+### Persistence
+
+Runtime metadata persists to SQLite at `codeweave.db`:
+
+- users
+- projects
+- scans
+- jobs
+- chat_sessions
+- graph_metadata
+
+Initial schema is documented in `migrations/0001_initial.sql`.
+
 ## Project Structure
 
 ```text

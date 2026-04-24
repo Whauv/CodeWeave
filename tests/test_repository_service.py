@@ -9,13 +9,22 @@ from pathlib import Path
 from unittest.mock import patch
 from subprocess import CompletedProcess
 
-from server.repository_service import _safe_extract_tar, diff_commits, normalize_github_repo_url
+from server.repository_service import (
+    _safe_extract_tar,
+    diff_commits,
+    normalize_github_repo_url,
+    validate_local_scan_path,
+)
 
 
 class RepositoryServiceTests(unittest.TestCase):
     def test_normalize_github_repo_url_handles_web_url(self) -> None:
         normalized = normalize_github_repo_url("https://github.com/openai/codemapper")
         self.assertEqual(normalized, "https://github.com/openai/codemapper.git")
+
+    def test_normalize_github_repo_url_enforces_allowed_hosts(self) -> None:
+        with self.assertRaises(ValueError):
+            normalize_github_repo_url("https://github.com/openai/codemapper", allowed_hosts={"git.example.com"})
 
     def test_safe_extract_tar_rejects_path_traversal(self) -> None:
         file_buffer = io.BytesIO()
@@ -56,6 +65,23 @@ class RepositoryServiceTests(unittest.TestCase):
         self.assertIn("diff_excerpt", payload)
         self.assertEqual(payload["status_counts"]["M"], 1)
         self.assertEqual(payload["status_counts"]["A"], 1)
+
+    def test_validate_local_scan_path_enforces_allowed_roots(self) -> None:
+        runtime_root = Path.cwd() / "tests_runtime_repository_service"
+        shutil.rmtree(runtime_root, ignore_errors=True)
+        allowed_root = runtime_root / "allowed"
+        outside_root = runtime_root / "outside"
+        allowed_root.mkdir(parents=True, exist_ok=True)
+        outside_root.mkdir(parents=True, exist_ok=True)
+        nested = allowed_root / "nested"
+        nested.mkdir(parents=True, exist_ok=True)
+        try:
+            resolved = validate_local_scan_path(str(nested), allowed_local_roots=[allowed_root])
+            self.assertEqual(resolved, nested.resolve())
+            with self.assertRaises(ValueError):
+                validate_local_scan_path(str(outside_root), allowed_local_roots=[allowed_root])
+        finally:
+            shutil.rmtree(runtime_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

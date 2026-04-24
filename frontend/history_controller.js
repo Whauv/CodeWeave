@@ -15,6 +15,42 @@
     let playbackLoopActive = false;
     let previousSnapshot = null;
 
+    async function parseJsonResponse(response, options = {}) {
+      const { allowNonJsonError = false } = options;
+      const rawText = await response.text();
+      if (!rawText) {
+        return {};
+      }
+      try {
+        return JSON.parse(rawText);
+      } catch (_error) {
+        if (allowNonJsonError && !response.ok) {
+          return {};
+        }
+        if (!response.ok) {
+          throw new Error(`Request failed (${response.status}).`);
+        }
+        throw new Error("Server returned an invalid JSON response.");
+      }
+    }
+
+    async function fetchJsonWithFallback(urls, options = {}) {
+      let lastError = "Request failed";
+      for (const url of urls) {
+        const response = await fetch(url, options);
+        const data = await parseJsonResponse(response, { allowNonJsonError: true });
+        if (response.ok) {
+          return { response, data };
+        }
+        const maybeError = data && typeof data === "object" ? data.error : "";
+        lastError = maybeError || `Request failed (${response.status}).`;
+        if (response.status !== 404) {
+          throw new Error(lastError);
+        }
+      }
+      throw new Error(lastError);
+    }
+
     function normalizePathTail(pathValue) {
       const normalized = String(pathValue || "").replace(/\\/g, "/").toLowerCase().trim();
       const parts = normalized.split("/").filter(Boolean);
@@ -56,6 +92,23 @@
 
     function getNodeIdentityLoose(node) {
       return `${String(node?.name || "").toLowerCase()}::${normalizePathLoose(node?.file)}`;
+    }
+
+    function normalizeDiffPayload(data, fromCommit, toCommit) {
+      const payload = data && typeof data === "object" ? data : {};
+      const changedFiles = Array.isArray(payload.changed_files)
+        ? payload.changed_files
+        : (Array.isArray(payload.changedFiles) ? payload.changedFiles : []);
+      return {
+        ...payload,
+        from_commit: payload.from_commit || payload.fromCommit || fromCommit?.hash || "",
+        to_commit: payload.to_commit || payload.toCommit || toCommit?.hash || "",
+        shortstat: String(payload.shortstat || payload.summary || "Diff summary unavailable."),
+        changed_files: changedFiles,
+        status_counts: payload.status_counts || payload.statusCounts || {},
+        diff_excerpt: String(payload.diff_excerpt || payload.diffExcerpt || ""),
+        truncated: Boolean(payload.truncated),
+      };
     }
 
     function buildSnapshotChangeSet(nextSnapshot) {
@@ -162,10 +215,56 @@
       try {
         let snapshot = getState().historySnapshotCache.get(commit.hash);
         if (!snapshot) {
-          const response = await fetch(`/api/history/${commit.hash}`);
-          const data = await response.json();
-          if (!response.ok) {
-            throw new Error(data.error || "Failed to load history snapshot");
+          let data = null;
+          try {
+            const { data: submitData } = await fetchJsonWithFallback(
+              ["/api/v1/jobs/history-snapshot"],
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ commit_hash: commit.hash }),
+              }
+            );
+            const jobId = String(submitData.job_id || "").trim();
+            if (!jobId) {
+              throw new Error("History snapshot job id was missing.");
+            }
+
+            for (let attempt = 0; attempt < 180; attempt += 1) {
+              await new Promise((resolve) => setTimeout(resolve, 450));
+              const statusResponse = await fetch(`/api/v1/jobs/${jobId}`);
+              const statusData = await parseJsonResponse(statusResponse);
+              if (!statusResponse.ok) {
+                throw new Error(statusData.error || "Failed to read history snapshot job status");
+              }
+              const status = String(statusData.status || "").toLowerCase();
+              if (status === "queued" || status === "running") {
+                continue;
+              }
+              if (status === "failed") {
+                throw new Error(statusData.error || "History snapshot job failed");
+              }
+              const resultResponse = await fetch(`/api/v1/jobs/${jobId}/result`);
+              const resultData = await parseJsonResponse(resultResponse);
+              if (!resultResponse.ok) {
+                throw new Error(resultData.error || "Failed to read history snapshot result");
+              }
+              data = resultData;
+              break;
+            }
+            if (!data) {
+              throw new Error("Timed out while loading history snapshot.");
+            }
+          } catch (jobError) {
+            try {
+              const fallback = await fetchJsonWithFallback([
+                `/api/v1/history/${commit.hash}`,
+                `/api/history/${commit.hash}`,
+              ]);
+              data = fallback.data;
+            } catch (_fallbackError) {
+              throw jobError;
+            }
           }
           snapshot = data;
           getState().historySnapshotCache.set(commit.hash, snapshot);
@@ -251,11 +350,7 @@
         });
         syncHistoryButtons();
 
-        const response = await fetch("/api/history");
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.error || "Could not load project history");
-        }
+        const { data } = await fetchJsonWithFallback(["/api/v1/history", "/api/history"]);
 
         const commits = Array.isArray(data.commits) ? data.commits : [];
         setState({
@@ -444,6 +539,7 @@
         };
 
         const candidateUrls = [
+          `/api/v1/history-diff/${fromCommit.hash}/${toCommit.hash}`,
           `/api/history-diff/${fromCommit.hash}/${toCommit.hash}`,
           `/api/history/diff/${fromCommit.hash}/${toCommit.hash}`,
         ];
@@ -473,11 +569,21 @@
         if (!data) {
           throw new Error(requestError || "Failed to load commit diff");
         }
-        deps.renderHistoryDiff?.(data);
+        const normalized = normalizeDiffPayload(data, fromCommit, toCommit);
+        deps.renderHistoryDiff?.(normalized);
         if (!silentStatus) {
           deps.setHistoryStatus(`Diff loaded for ${fromCommit.short_hash} -> ${toCommit.short_hash}.`);
         }
       } catch (error) {
+        deps.renderHistoryDiff?.({
+          shortstat: `Failed to load commit diff: ${error.message}`,
+          changed_files: [],
+          from_commit: fromCommit?.hash || "",
+          to_commit: toCommit?.hash || "",
+          truncated: false,
+          status_counts: {},
+          diff_excerpt: "",
+        });
         if (!silentStatus) {
           deps.setHistoryStatus(error.message);
         }

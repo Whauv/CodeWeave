@@ -22,6 +22,42 @@
       return setState(nextState);
     }
 
+    async function parseJsonResponse(response, options = {}) {
+      const { allowNonJsonError = false } = options;
+      const rawText = await response.text();
+      if (!rawText) {
+        return {};
+      }
+      try {
+        return JSON.parse(rawText);
+      } catch (_error) {
+        if (allowNonJsonError && !response.ok) {
+          return {};
+        }
+        if (!response.ok) {
+          throw new Error(`Request failed (${response.status}).`);
+        }
+        throw new Error("Server returned an invalid JSON response.");
+      }
+    }
+
+    async function fetchJsonWithFallback(urls, options = {}) {
+      let lastError = "Request failed";
+      for (const url of urls) {
+        const response = await fetch(url, options);
+        const data = await parseJsonResponse(response, { allowNonJsonError: true });
+        if (response.ok) {
+          return { response, data };
+        }
+        const maybeError = data && typeof data === "object" ? data.error : "";
+        lastError = maybeError || `Request failed (${response.status}).`;
+        if (response.status !== 404) {
+          throw new Error(lastError);
+        }
+      }
+      throw new Error(lastError);
+    }
+
     function resetScanMetrics() {
       const nodes = getDom("metric-nodes");
       const edges = getDom("metric-edges");
@@ -235,14 +271,61 @@
         resetScanMetrics();
         showScanOverlay();
 
-        const response = await fetch("/api/scan", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path, language: state.currentLanguage }),
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.error || "Scan failed");
+        let data = null;
+        try {
+          const { data: submitData } = await fetchJsonWithFallback(
+            ["/api/v1/jobs/scan"],
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ path, language: state.currentLanguage }),
+            }
+          );
+          const jobId = String(submitData.job_id || "").trim();
+          if (!jobId) {
+            throw new Error("Scan job was created without a job id.");
+          }
+
+          for (let attempt = 0; attempt < 180; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            const statusResponse = await fetch(`/api/v1/jobs/${jobId}`);
+            const statusData = await parseJsonResponse(statusResponse);
+            if (!statusResponse.ok) {
+              throw new Error(statusData.error || "Failed to read scan job status");
+            }
+            const status = String(statusData.status || "").toLowerCase();
+            if (status === "queued" || status === "running") {
+              continue;
+            }
+            if (status === "failed") {
+              throw new Error(statusData.error || "Scan job failed");
+            }
+            const resultResponse = await fetch(`/api/v1/jobs/${jobId}/result`);
+            const resultData = await parseJsonResponse(resultResponse);
+            if (!resultResponse.ok) {
+              throw new Error(resultData.error || "Failed to read scan result");
+            }
+            data = resultData;
+            break;
+          }
+
+          if (!data) {
+            throw new Error("Scan timed out waiting for completion.");
+          }
+        } catch (jobError) {
+          try {
+            const fallback = await fetchJsonWithFallback(
+              ["/api/v1/scan", "/api/scan"],
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ path, language: state.currentLanguage }),
+              }
+            );
+            data = fallback.data;
+          } catch (_fallbackError) {
+            throw jobError;
+          }
         }
 
         updateState({ currentScanTarget: path });

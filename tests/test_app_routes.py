@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 import unittest
 from unittest.mock import patch
 
@@ -22,9 +23,8 @@ class AppRouteTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.client = app.test_client()
-        STATE.graph_cache = None
-        STATE.scan_context = None
-        STATE.history_graph_cache.clear()
+        self.client.environ_base["HTTP_X_CODEWEAVE_USER"] = f"routes-{uuid.uuid4().hex}"
+        STATE.reset()
 
     def test_languages_endpoint_returns_supported_options(self) -> None:
         response = self.client.get("/api/languages")
@@ -54,7 +54,9 @@ class AppRouteTests(unittest.TestCase):
             json={"path": "C:/this/path/does/not/exist", "language": "python"},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("error", response.get_json())
+        payload = response.get_json()
+        self.assertIn("error", payload)
+        self.assertEqual(payload.get("error_code"), "scan_source_validation_failed")
 
     def test_chat_requires_graph_context(self) -> None:
         response = self.client.post("/api/chat", json={"message": "What breaks?"})
@@ -62,19 +64,20 @@ class AppRouteTests(unittest.TestCase):
         self.assertEqual(response.get_json()["error"], "No graph scanned yet")
 
     def test_history_diff_endpoint_contract_canonical_and_legacy(self) -> None:
-        STATE.scan_context = {"scan_root": str("."), "source_kind": "local", "language": "python"}
         diff_payload = {
-            "from_commit": "abc123",
-            "to_commit": "def456",
+            "from_commit": "abc1234",
+            "to_commit": "def4567",
             "shortstat": "1 file changed, 3 insertions(+)",
             "changed_files": [{"status": "M", "path": "app.py"}],
             "status_counts": {"A": 0, "M": 1, "D": 0, "R": 0},
             "diff_excerpt": "diff --git a/app.py b/app.py",
             "truncated": False,
         }
-        with patch("server.app.is_git_repo", return_value=True), patch("server.app.diff_commits", return_value=diff_payload):
-            canonical = self.client.get("/api/history-diff/abc123/def456")
-            legacy = self.client.get("/api/history/diff/abc123/def456")
+        with patch("server.app._load_latest_scan", return_value=({}, {"scan_root": str("."), "source_kind": "local", "language": "python"})), patch(
+            "server.app.is_git_repo", return_value=True
+        ), patch("server.app.diff_commits", return_value=diff_payload):
+            canonical = self.client.get("/api/history-diff/abc1234/def4567")
+            legacy = self.client.get("/api/history/diff/abc1234/def4567")
 
         self.assertEqual(canonical.status_code, 200)
         self.assertEqual(legacy.status_code, 200)
@@ -85,6 +88,13 @@ class AppRouteTests(unittest.TestCase):
             self.assertIn("changed_files", payload)
             self.assertIn("truncated", payload)
             self.assertIn("status_counts", payload)
+
+    def test_history_snapshot_rejects_invalid_commit_hash(self) -> None:
+        with patch("server.app._load_latest_scan", return_value=({}, {"scan_root": str("."), "source_kind": "local", "language": "python"})):
+            response = self.client.get("/api/history/not-a-hash")
+        self.assertEqual(response.status_code, 400)
+        payload = response.get_json()
+        self.assertEqual(payload.get("error_code"), "invalid_commit_hash")
 
 
 if __name__ == "__main__":

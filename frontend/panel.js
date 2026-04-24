@@ -42,6 +42,31 @@ let lastDetailNodeSnapshot = null;
 const DEFAULT_CHAT_PROVIDER = "groq";
 const CHAT_STORAGE_KEY = "codeweave-chat-sessions-v1";
 
+async function fetchJsonWithFallback(urls, options = {}) {
+  let lastError = "Request failed";
+  for (const url of urls) {
+    const response = await fetch(url, options);
+    const rawText = await response.text();
+    let payload = {};
+    if (rawText) {
+      try {
+        payload = JSON.parse(rawText);
+      } catch (_error) {
+        payload = {};
+      }
+    }
+    if (response.ok) {
+      return { response, payload };
+    }
+    const maybeError = payload && typeof payload === "object" ? payload.error : "";
+    lastError = maybeError || `Request failed (${response.status})`;
+    if (response.status !== 404) {
+      throw new Error(lastError);
+    }
+  }
+  throw new Error(lastError);
+}
+
 function makeSessionId() {
   return `chat_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -318,22 +343,21 @@ async function submitChatMessage() {
   setChatPending(true);
 
   try {
-    const response = await fetch("/api/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message,
-        node_id: activeSession.nodeId || activeChatNodeId,
-        provider: DEFAULT_CHAT_PROVIDER,
-        history: activeSession.messages,
-      }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || "Chat request failed");
-    }
+    const { payload: data } = await fetchJsonWithFallback(
+      ["/api/v1/chat", "/api/chat"],
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message,
+          node_id: activeSession.nodeId || activeChatNodeId,
+          provider: DEFAULT_CHAT_PROVIDER,
+          history: activeSession.messages,
+        }),
+      }
+    );
     activeSession.messages.push({
       role: "assistant",
       content: data.answer || "No response generated.",
@@ -439,15 +463,14 @@ async function ensureServerGraphCache() {
   }
   const language =
     document.getElementById("language-input")?.value?.trim() || "python";
-  const response = await fetch("/api/scan", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: target, language }),
-  });
-  if (!response.ok) {
-    const payload = await response.text();
-    throw new Error(payload || "Failed to restore server graph cache.");
-  }
+  await fetchJsonWithFallback(
+    ["/api/v1/scan", "/api/scan"],
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: target, language }),
+    }
+  );
   return true;
 }
 
