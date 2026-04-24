@@ -14,6 +14,7 @@
     let previousRenderScope = "";
 
     function applyTreeLayout(nodes, links, width, height, options = {}) {
+      const spacingScale = Math.max(0.8, Math.min(1.6, Number(options.graphSpacing) || 1));
       const usePinnedParents = !Boolean(options.historyMode);
       const incoming = new Map(nodes.map((node) => [node.id, []]));
       const outgoing = new Map(nodes.map((node) => [node.id, []]));
@@ -167,8 +168,12 @@
 
       const visibleLeafCount = Math.max(1, hierarchyRoot.children?.reduce((sum, child) => sum + (child.data.leafWeight || 1), 0) || 1);
       const maxDepth = Math.max(1, ...nodes.map((node) => depthMap.get(node.id) || 0));
-      const horizontalGap = Math.max(150, Math.min(280, Math.floor((width - 220) / Math.max(1, maxDepth))));
-      const verticalGap = visibleLeafCount > 260 ? 20 : visibleLeafCount > 180 ? 24 : visibleLeafCount > 110 ? 30 : 36;
+      const horizontalGap = Math.max(
+        120,
+        Math.min(360, Math.floor(((width - 220) / Math.max(1, maxDepth)) * spacingScale))
+      );
+      const verticalGapBase = visibleLeafCount > 260 ? 20 : visibleLeafCount > 180 ? 24 : visibleLeafCount > 110 ? 30 : 36;
+      const verticalGap = Math.max(18, Math.min(52, verticalGapBase * spacingScale));
 
       const treeLayout = d3
         .tree()
@@ -223,7 +228,7 @@
             previousNode = node;
             return;
           }
-          const minimumGap = Math.max(34, getNodeRadius(previousNode) + getNodeRadius(node) + 18);
+          const minimumGap = Math.max(34, (getNodeRadius(previousNode) + getNodeRadius(node) + 18) * spacingScale);
           const desiredY = (previousNode.y || 0) + minimumGap;
           if ((node.y || 0) < desiredY) {
             node.y = desiredY;
@@ -570,6 +575,10 @@
       if (labelLayer.empty()) {
         labelLayer = zoomLayer.append("g").attr("class", "labels");
       }
+      let edgeLabelLayer = zoomLayer.select("g.edge-labels");
+      if (edgeLabelLayer.empty()) {
+        edgeLabelLayer = zoomLayer.append("g").attr("class", "edge-labels");
+      }
 
       svg.on(".zoom", null);
       const zoomBehavior = d3.zoom()
@@ -579,7 +588,7 @@
         .on("end", (event) => onZoomEnd(event, zoomLayer));
       svg.call(zoomBehavior);
       svg.call(zoomBehavior.transform, currentZoomTransform || d3.zoomIdentity);
-      return { zoomBehavior, zoomLayer, linkLayer, nodeLayer, labelLayer };
+      return { zoomBehavior, zoomLayer, linkLayer, nodeLayer, labelLayer, edgeLabelLayer };
     }
 
     function fitTreeToViewport(layers, nodes, width, height) {
@@ -633,7 +642,10 @@
       }
       layers.linkLayer.selectAll("line").interrupt().remove();
       const { nodes, links } = getGraphCollections(data);
-      const layoutData = applyTreeLayout(nodes, links, width, height, { historyMode: Boolean(layers.historyMode) });
+      const layoutData = applyTreeLayout(nodes, links, width, height, {
+        historyMode: Boolean(layers.historyMode),
+        graphSpacing: layers.graphSpacing,
+      });
       const depthMap = layoutData.depthMap;
       const currentParentMap = layoutData.parentMap || new Map();
       const currentNodesById = layoutData.nodeById || new Map(nodes.map((node) => [node.id, node]));
@@ -785,6 +797,25 @@
         .attr("text-anchor", "start")
         .attr("pointer-events", "none");
 
+      const edgeLabelSelection = layers.edgeLabelLayer
+        .selectAll("text")
+        .data(layers.edgeLabelsEnabled ? renderLinks.filter((link) => (link.weight || 1) > 1) : [], (link) => `${link.source.id}-${link.target.id}`)
+        .join(
+          (enter) =>
+            enter
+              .append("text")
+              .attr("font-size", 10)
+              .attr("font-weight", 600)
+              .attr("fill", palette.muted || palette.label)
+              .attr("text-anchor", "middle")
+              .attr("pointer-events", "none"),
+          (update) => update,
+          (exit) => exit.remove()
+        )
+        .text((link) => String(link.weight || 1))
+        .attr("x", (link) => (link.source.x + link.target.x) / 2)
+        .attr("y", (link) => (link.source.y + link.target.y) / 2 - 4);
+
       const currentIds = new Set(nodes.map((node) => node.id));
       const shouldAutoFit =
         !previousVisibleNodeIds.size;
@@ -797,21 +828,22 @@
         fitTreeToViewport(layers, nodes, width, height);
       }
 
-      return { linkSelection, nodeSelection, labelSelection, simulation: null };
+      return { linkSelection, nodeSelection, labelSelection, edgeLabelSelection, simulation: null };
     }
 
     function renderForceGraph(data, width, height, layers, bindNodeInteractions, dragHandlers) {
       layers.linkLayer.selectAll("path").interrupt().remove();
       const { nodes, links } = getGraphCollections(data);
       const palette = getGraphPalette();
+      const spacingScale = Math.max(0.75, Math.min(1.8, Number(layers.graphSpacing) || 1));
       const linkTransition = d3.transition().duration(320).ease(d3.easeCubicOut);
       const nodeTransition = d3.transition().duration(420).ease(d3.easeBackOut.overshoot(1.1));
       const simulation = d3
         .forceSimulation(nodes)
-        .force("link", d3.forceLink(links).id((node) => node.id).distance((link) => link.source.isCluster || link.target.isCluster ? 200 : 155))
-        .force("charge", d3.forceManyBody().strength((node) => node.isCluster ? -620 : -380))
+        .force("link", d3.forceLink(links).id((node) => node.id).distance((link) => (link.source.isCluster || link.target.isCluster ? 200 : 155) * spacingScale))
+        .force("charge", d3.forceManyBody().strength((node) => (node.isCluster ? -620 : -380) * spacingScale))
         .force("center", d3.forceCenter(width / 2, height / 2))
-        .force("collide", d3.forceCollide().radius((node) => getNodeRadius(node) + 20))
+        .force("collide", d3.forceCollide().radius((node) => getNodeRadius(node) + 20 * spacingScale))
         .alphaDecay(0.08)
         .velocityDecay(0.45);
 
@@ -881,6 +913,23 @@
         .attr("text-anchor", "middle")
         .attr("pointer-events", "none");
 
+      const edgeLabelSelection = layers.edgeLabelLayer
+        .selectAll("text")
+        .data(layers.edgeLabelsEnabled ? links.filter((link) => (link.weight || 1) > 1) : [], (link) => `${link.source.id}-${link.target.id}`)
+        .join(
+          (enter) =>
+            enter
+              .append("text")
+              .attr("font-size", 10)
+              .attr("font-weight", 600)
+              .attr("fill", palette.muted || palette.label)
+              .attr("text-anchor", "middle")
+              .attr("pointer-events", "none"),
+          (update) => update,
+          (exit) => exit.remove()
+        )
+        .text((link) => String(link.weight || 1));
+
       simulation.on("tick", () => {
         linkSelection
           .attr("x1", (link) => link.source.x)
@@ -889,9 +938,12 @@
           .attr("y2", (link) => link.target.y);
         nodeSelection.attr("cx", (node) => node.x).attr("cy", (node) => node.y);
         labelSelection.attr("x", (node) => node.x).attr("y", (node) => node.y + getNodeRadius(node) + 14);
+        edgeLabelSelection
+          .attr("x", (link) => ((link.source.x || 0) + (link.target.x || 0)) / 2)
+          .attr("y", (link) => ((link.source.y || 0) + (link.target.y || 0)) / 2 - 4);
       });
 
-      return { linkSelection, nodeSelection, labelSelection, simulation };
+      return { linkSelection, nodeSelection, labelSelection, edgeLabelSelection, simulation };
     }
 
     return {
