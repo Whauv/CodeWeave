@@ -11,3 +11,4 @@ test-results/
 history_snapshots_runtime/
 .codeweave_tmp/
 tmp*/
+codeweave.db

@@ -216,6 +216,11 @@
         applyBlastData(state.currentBlastData);
       } else if (state.currentSearchQuery) {
         searchNodes(state.currentSearchQuery);
+      } else {
+        const selectedNodeId = getSelectedNodeId();
+        if (selectedNodeId) {
+          applyHoverTrace(selectedNodeId);
+        }
       }
     }
 

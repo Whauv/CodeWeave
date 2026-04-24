@@ -43,10 +43,8 @@
     function applyTheme(nextTheme, persist = true) {
       updateState({ themeMode: nextTheme });
       document.body.dataset.theme = nextTheme;
-      const button = getDom("theme-toggle-btn");
-      if (button) {
-        button.textContent = nextTheme === "dark" ? "Light Theme" : "Dark Theme";
-      }
+      getDom("theme-light-btn")?.classList.toggle("active", nextTheme === "light");
+      getDom("theme-dark-btn")?.classList.toggle("active", nextTheme === "dark");
       if (persist) {
         localStorage.setItem(getStorageKeys().theme, nextTheme);
       }
@@ -282,8 +280,8 @@
         deps.stopHistoryPlayback();
         onLoadHistorySnapshot(Number(event.target.value || 0));
       });
-      getDom("theme-toggle-btn")?.addEventListener("click", () => {
-        applyTheme(getState().themeMode === "dark" ? "light" : "dark");
+      const applyAndRenderTheme = (nextTheme) => {
+        applyTheme(nextTheme);
         if (getState().graphData) {
           renderGraph(getState().graphData);
           restoreVisualState();
@@ -291,6 +289,11 @@
         if (globalScope.monaco) {
           globalScope.monaco.editor.setTheme(getMonacoTheme());
         }
+      };
+      getDom("theme-light-btn")?.addEventListener("click", () => applyAndRenderTheme("light"));
+      getDom("theme-dark-btn")?.addEventListener("click", () => applyAndRenderTheme("dark"));
+      getDom("theme-toggle-btn")?.addEventListener("click", () => {
+        applyAndRenderTheme(getState().themeMode === "dark" ? "light" : "dark");
       });
       getDom("search-input")?.addEventListener("input", (event) => onSearch(event.target.value));
       getDom("graph-load-more-btn")?.addEventListener("click", onLoadMore);

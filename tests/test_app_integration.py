@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import unittest
+import uuid
 from pathlib import Path
 
 try:
@@ -24,9 +25,8 @@ class AppIntegrationTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.client = app.test_client()
-        STATE.graph_cache = None
-        STATE.scan_context = None
-        STATE.history_graph_cache.clear()
+        self.client.environ_base["HTTP_X_CODEWEAVE_USER"] = f"integration-{uuid.uuid4().hex}"
+        STATE.reset()
         self.runtime_root = Path.cwd() / "tests_runtime_integration"
         shutil.rmtree(self.runtime_root, ignore_errors=True)
         self.runtime_root.mkdir(parents=True, exist_ok=True)

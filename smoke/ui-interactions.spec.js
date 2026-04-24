@@ -89,7 +89,7 @@ test.describe("CodeWeave interaction flows", () => {
   });
 
   test("submits a chat question and renders the assistant response", async ({ page }) => {
-    await page.route("**/api/chat", async (route) => {
+    const mockChatApi = async (route) => {
       const request = route.request();
       const payload = request.postDataJSON();
       await route.fulfill({
@@ -101,7 +101,9 @@ test.describe("CodeWeave interaction flows", () => {
           answer: "Changing this node will affect its direct callers and one downstream formatter.",
         }),
       });
-    });
+    };
+    await page.route("**/api/v1/chat", mockChatApi);
+    await page.route("**/api/chat", mockChatApi);
 
     await scanFixture(page);
     await page.locator("#chat-input").fill("What breaks if I change this node?");

@@ -62,13 +62,6 @@
 
       const state = getState();
       let changed = false;
-      if (state.loadedNodeCount < state.graphData.nodes.length) {
-        const visibleIds = new Set(deps.getVisibleBaseNodes().map((node) => node.id));
-        if (!visibleIds.has(nodeId)) {
-          updateState({ loadedNodeCount: state.graphData.nodes.length });
-          changed = true;
-        }
-      }
 
       const clusterKey = deps.getClusterKey(raw);
       if (state.collapsedClusterKeys.has(clusterKey)) {
@@ -93,10 +86,13 @@
       const state = getState();
       if (node.isCluster) {
         state.collapsedClusterKeys.delete(node.clusterKey);
-        updateState({ currentFocusedClusterKey: node.clusterKey });
+        updateState({
+          currentFocusedClusterKey: node.clusterKey,
+          selectedNodeId: null,
+        });
         renderGraph(state.graphData);
         restoreVisualState();
-        setStatus(`Expanded ${node.name} cluster.`);
+        setStatus(`Expanded ${node.name} cluster branch.`);
         return;
       }
       selectNode(node.id, true);
