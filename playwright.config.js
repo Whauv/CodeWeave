@@ -16,6 +16,7 @@ function resolvePythonCommand() {
 /** @type {import('@playwright/test').PlaywrightTestConfig} */
 const config = {
   testDir: "./smoke",
+  snapshotPathTemplate: "{testDir}/{testFilePath}-snapshots/{arg}{ext}",
   timeout: 60000,
   // The Flask test server holds scan state in process memory.
   // Keep CI smoke tests single-worker to avoid cross-test state races.

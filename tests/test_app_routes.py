@@ -33,6 +33,19 @@ class AppRouteTests(unittest.TestCase):
         self.assertIn("languages", payload)
         self.assertGreaterEqual(len(payload["languages"]), 4)
 
+    def test_metrics_endpoint_exposes_prometheus_text(self) -> None:
+        response = self.client.get("/metrics")
+        self.assertEqual(response.status_code, 200)
+        text = response.get_data(as_text=True)
+        self.assertIn("codeweave_http_requests_total", text)
+        self.assertIn("codeweave_jobs_total", text)
+
+    def test_health_ready_returns_schema_version(self) -> None:
+        response = self.client.get("/health/ready")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertIn("schema_version", payload)
+
     def test_graph_endpoint_requires_prior_scan(self) -> None:
         response = self.client.get("/api/graph")
         self.assertEqual(response.status_code, 404)

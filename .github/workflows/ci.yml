@@ -9,7 +9,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,12 +39,14 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Install Playwright browser
+        if: matrix.os == 'ubuntu-latest'
         run: npx playwright install --with-deps chromium
 
       - name: Run Python tests
         run: python -m unittest discover -s tests -v
 
       - name: Run browser smoke tests
+        if: matrix.os == 'ubuntu-latest'
         env:
           CODEWEAVE_PYTHON: python
           FLASK_DEBUG: "0"

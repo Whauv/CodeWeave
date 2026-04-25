@@ -153,9 +153,20 @@ CodeWeave now includes production-focused API and operational primitives:
 - health probes:
   - `GET /health/live`
   - `GET /health/ready`
+- observability endpoint:
+  - `GET /metrics` (Prometheus text format)
 - structured logging with correlation:
   - request id from `X-Request-Id` (generated when missing)
   - user identity from auth/header context
+
+### Error Monitoring (Sentry)
+
+Optional Sentry support is available when configured:
+
+- `SENTRY_DSN`
+- `SENTRY_ENVIRONMENT` (default: `development`)
+- `SENTRY_RELEASE` (default: `codeweave-dev`)
+- `SENTRY_TRACES_SAMPLE_RATE` (default: `0.0`)
 
 ### Auth And Rate Limits
 
@@ -189,6 +200,19 @@ Runtime metadata persists to SQLite at `codeweave.db`:
 - jobs
 - chat_sessions
 - graph_metadata
+- audit_logs
+
+Migrations run automatically on startup.
+
+Manual migration command:
+
+```powershell
+.venv\Scripts\python.exe -m server.migrate
+```
+
+Optional schema guard:
+
+- `CODEWEAVE_REQUIRED_SCHEMA_VERSION=<n>`
 
 Initial schema is documented in `migrations/0001_initial.sql`.
 
@@ -248,6 +272,34 @@ Run the browser smoke suite with Playwright after installing dev dependencies:
 npm install
 npm run smoke
 ```
+
+Run state snapshots for key UI states:
+
+```powershell
+npm run smoke:update-snapshots
+```
+
+## Developer Workflow
+
+One-command workflows:
+
+```powershell
+npm run dev
+npm run test
+npm run smoke
+```
+
+Pre-commit hooks:
+
+```powershell
+pre-commit install
+pre-commit run --all-files
+```
+
+CI now runs a Linux/Windows matrix:
+
+- Python unit/integration tests on both OSes
+- Playwright smoke tests on Linux
 
 The Playwright config now boots the local Flask app automatically, and the smoke suite scans a tiny TypeScript fixture repo to verify the end-to-end graph flow without depending on Groq availability.
 The browser suite also exercises blast-radius actions, export downloads, theme/history persistence, chat rendering, and Evolution mode on a temporary multi-commit git fixture.

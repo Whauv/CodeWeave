@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 try:
     from dotenv import load_dotenv
@@ -42,6 +43,7 @@ from server.chat_service import chat_with_provider
 from server.errors import ApiError, error_response, from_api_error
 from server.jobs import JOBS
 from server.logging_config import REQUEST_ID, configure_logging
+from server.metrics import METRICS
 from server.rate_limit import rate_limit
 from server.repository_service import (
     DEFAULT_ALLOWED_GITHUB_HOSTS,
@@ -54,6 +56,7 @@ from server.repository_service import (
     resolve_scan_source,
 )
 from server.schemas import parse_chat_request, parse_scan_request, validate_commit_hash
+from server.sentry_config import capture_exception, init_sentry
 from server.snapshot_cache import (
     load_history_snapshot,
     load_scan_snapshot,
@@ -65,6 +68,7 @@ from server.state import STATE
 
 load_dotenv()
 configure_logging()
+init_sentry()
 LOGGER = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -150,10 +154,19 @@ def _setup_request_context() -> None:
     identity_hint = str(request.headers.get("X-Codeweave-User") or request.remote_addr or "anonymous")
     set_request_identity(identity_hint)
     STATE.reset()
+    request.__codeweave_started_at = time.perf_counter()
 
 
 @app.after_request
 def _finalize_request(response: Any) -> Any:
+    route = request.url_rule.rule if request.url_rule else request.path
+    started_at = float(getattr(request, "__codeweave_started_at", time.perf_counter()))
+    METRICS.observe_request(
+        method=request.method,
+        route=route,
+        status_code=int(getattr(response, "status_code", 0) or 0),
+        duration_seconds=max(0.0, time.perf_counter() - started_at),
+    )
     try:
         identity = get_request_identity()
         if identity and identity != "anonymous":
@@ -179,6 +192,15 @@ def _finalize_request(response: Any) -> Any:
     except Exception as audit_error:
         LOGGER.debug("Audit write skipped: %s", audit_error)
     return response
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(exc: Exception) -> Any:
+    if isinstance(exc, HTTPException):
+        return exc
+    capture_exception(exc, path=request.path, method=request.method, request_id=REQUEST_ID.get("-"))
+    LOGGER.exception("Unhandled error: %s", exc)
+    return error_response("internal_server_error", "Unexpected server error.", 500)
 
 
 def _run_with_timeout(
@@ -437,6 +459,15 @@ def health_live() -> Any:
 def health_ready() -> Any:
     db.init_db()
     return jsonify({"status": "ready", "db": str(db.DB_PATH), "schema_version": db.get_schema_version()})
+
+
+@app.get("/metrics")
+def metrics_endpoint() -> Any:
+    return app.response_class(
+        response=METRICS.to_prometheus_text(),
+        status=200,
+        mimetype="text/plain; version=0.0.4; charset=utf-8",
+    )
 
 
 @app.get("/api/languages")

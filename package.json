@@ -4,7 +4,12 @@
   "version": "0.1.0",
   "description": "Playwright smoke tests for the CodeWeave frontend",
   "scripts": {
-    "smoke": "playwright test"
+    "dev": "node scripts/run-python.js server/app.py",
+    "test": "node scripts/run-python.js -m unittest discover -s tests -v",
+    "test:contract": "node scripts/run-python.js -m unittest tests.test_api_contract -v",
+    "test:load": "node scripts/run-python.js -m unittest tests.test_api_load -v",
+    "smoke": "playwright test",
+    "smoke:update-snapshots": "playwright test smoke/ui-snapshots.spec.js --update-snapshots"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.0"
