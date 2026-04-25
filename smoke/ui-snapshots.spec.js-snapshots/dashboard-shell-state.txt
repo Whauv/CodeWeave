@@ -1,0 +1,23 @@
+{
+  "theme": "dark",
+  "status": "Ready to scan",
+  "controls": [
+    {
+      "id": "tree-layout-btn",
+      "active": true
+    },
+    {
+      "id": "force-layout-btn",
+      "active": false
+    },
+    {
+      "id": "cluster-toggle-btn",
+      "active": true
+    },
+    {
+      "id": "history-btn",
+      "active": false
+    }
+  ],
+  "historyStatus": "Load a scanned git repo to begin."
+}

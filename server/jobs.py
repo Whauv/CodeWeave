@@ -11,7 +11,9 @@ from typing import Any, Callable
 
 from server import db
 from server.errors import ApiError
+from server.metrics import METRICS
 from server.queue_worker import QueueWorker
+from server.sentry_config import capture_exception
 
 
 JobHandler = Callable[[str, dict[str, Any]], dict[str, Any]]
@@ -58,6 +60,7 @@ class JobManager:
                         payload=payload,
                         result=result,
                     )
+                    METRICS.observe_job(job_type=job_type, status="succeeded")
                     return result
                 except Exception as exc:
                     retryable = self._is_retryable(exc)
@@ -82,6 +85,8 @@ class JobManager:
                         payload=payload,
                         error_message=f"{message}\n{traceback.format_exc(limit=5)}",
                     )
+                    METRICS.observe_job(job_type=job_type, status="failed")
+                    capture_exception(exc, job_id=job_id, job_type=job_type, attempts=attempts)
                     raise
 
         future = self._worker.submit(run)

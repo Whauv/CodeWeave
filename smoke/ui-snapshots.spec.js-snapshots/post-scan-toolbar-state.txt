@@ -1,0 +1,9 @@
+{
+  "mode": "Explore",
+  "nodes": "4",
+  "edges": "6",
+  "focusBadge": "Focus OFF",
+  "edgeLabelsActive": false,
+  "neighborDepth": "2",
+  "graphSpacing": "1.0"
+}

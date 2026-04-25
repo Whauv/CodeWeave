@@ -6,3 +6,5 @@ groq
 astunparse
 python-dotenv
 gunicorn
+sentry-sdk
+pre-commit
