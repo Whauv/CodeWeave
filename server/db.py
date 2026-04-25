@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from server.migrations import get_current_schema_version, run_migrations
 
 
 DB_PATH = Path(__file__).resolve().parents[1] / "codeweave.db"
@@ -20,69 +23,26 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def get_schema_version() -> int:
+    conn = _connect()
+    try:
+        return get_current_schema_version(conn)
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     conn = _connect()
     try:
-        conn.executescript(
-            """
-            PRAGMA journal_mode=WAL;
-            CREATE TABLE IF NOT EXISTS users (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              identity TEXT NOT NULL UNIQUE,
-              created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS projects (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              user_id INTEGER NOT NULL,
-              target TEXT NOT NULL,
-              source_kind TEXT NOT NULL,
-              language TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              UNIQUE(user_id, target),
-              FOREIGN KEY(user_id) REFERENCES users(id)
-            );
-            CREATE TABLE IF NOT EXISTS scans (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              user_id INTEGER NOT NULL,
-              project_id INTEGER NOT NULL,
-              graph_json TEXT NOT NULL,
-              scan_context_json TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              FOREIGN KEY(user_id) REFERENCES users(id),
-              FOREIGN KEY(project_id) REFERENCES projects(id)
-            );
-            CREATE TABLE IF NOT EXISTS jobs (
-              id TEXT PRIMARY KEY,
-              user_id INTEGER NOT NULL,
-              job_type TEXT NOT NULL,
-              status TEXT NOT NULL,
-              payload_json TEXT,
-              result_json TEXT,
-              error_message TEXT,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              FOREIGN KEY(user_id) REFERENCES users(id)
-            );
-            CREATE TABLE IF NOT EXISTS chat_sessions (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              user_id INTEGER NOT NULL,
-              node_id TEXT,
-              provider TEXT,
-              message TEXT NOT NULL,
-              answer TEXT,
-              created_at TEXT NOT NULL,
-              FOREIGN KEY(user_id) REFERENCES users(id)
-            );
-            CREATE TABLE IF NOT EXISTS graph_metadata (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              scan_id INTEGER NOT NULL,
-              node_count INTEGER NOT NULL,
-              edge_count INTEGER NOT NULL,
-              created_at TEXT NOT NULL,
-              FOREIGN KEY(scan_id) REFERENCES scans(id)
-            );
-            """
-        )
+        conn.execute("PRAGMA journal_mode=WAL;")
+        schema_version = run_migrations(conn)
+        required_version = max(0, int(os.getenv("CODEWEAVE_REQUIRED_SCHEMA_VERSION", "0")))
+        current_version = max(schema_version, get_current_schema_version(conn))
+        if current_version < required_version:
+            raise RuntimeError(
+                f"Database schema version {current_version} is below required version {required_version}. "
+                "Run migrations before starting the server."
+            )
         conn.commit()
     finally:
         conn.close()
@@ -249,6 +209,76 @@ def get_job(job_id: str, identity: str) -> dict[str, Any] | None:
             "error_message": str(row["error_message"]) if row["error_message"] else None,
             "created_at": str(row["created_at"]),
             "updated_at": str(row["updated_at"]),
+        }
+    finally:
+        conn.close()
+
+
+def save_audit_event(
+    *,
+    identity: str,
+    action: str,
+    target: str | None = None,
+    status_code: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    user_id = get_or_create_user(identity)
+    conn = _connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO audit_logs(user_id, action, target, status_code, metadata_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                action[:120],
+                (target or "")[:400],
+                int(status_code) if status_code is not None else None,
+                json.dumps(metadata or {}),
+                _utc_now(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def cleanup_expired_artifacts(
+    *,
+    scan_ttl_days: int = 30,
+    job_ttl_days: int = 14,
+    audit_ttl_days: int = 30,
+) -> dict[str, int]:
+    now = datetime.now(UTC)
+    scan_cutoff = now.replace(microsecond=0).isoformat()
+    job_cutoff = scan_cutoff
+    audit_cutoff = scan_cutoff
+    if scan_ttl_days > 0:
+        scan_cutoff = (now - timedelta(days=scan_ttl_days)).replace(microsecond=0).isoformat()
+    if job_ttl_days > 0:
+        job_cutoff = (now - timedelta(days=job_ttl_days)).replace(microsecond=0).isoformat()
+    if audit_ttl_days > 0:
+        audit_cutoff = (now - timedelta(days=audit_ttl_days)).replace(microsecond=0).isoformat()
+
+    conn = _connect()
+    try:
+        scans_deleted = (
+            conn.execute("DELETE FROM scans WHERE created_at < ?", (scan_cutoff,)).rowcount if scan_ttl_days > 0 else 0
+        )
+        jobs_deleted = (
+            conn.execute("DELETE FROM jobs WHERE updated_at < ?", (job_cutoff,)).rowcount if job_ttl_days > 0 else 0
+        )
+        audit_deleted = (
+            conn.execute("DELETE FROM audit_logs WHERE created_at < ?", (audit_cutoff,)).rowcount
+            if audit_ttl_days > 0
+            else 0
+        )
+        conn.commit()
+        return {
+            "scans_deleted": int(scans_deleted or 0),
+            "jobs_deleted": int(jobs_deleted or 0),
+            "audit_deleted": int(audit_deleted or 0),
         }
     finally:
         conn.close()
