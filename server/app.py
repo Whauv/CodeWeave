@@ -5,11 +5,13 @@ import os
 import shutil
 import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
+from werkzeug.exceptions import RequestEntityTooLarge
 
 try:
     from dotenv import load_dotenv
@@ -40,11 +42,18 @@ from server.repository_service import (
     diff_commits,
     ensure_cached_repo,
     extract_commit_snapshot,
+    get_head_commit_hash,
     is_git_repo,
     list_repo_commits,
     resolve_scan_source,
 )
 from server.schemas import parse_chat_request, parse_scan_request, validate_commit_hash
+from server.snapshot_cache import (
+    load_history_snapshot,
+    load_scan_snapshot,
+    save_history_snapshot,
+    save_scan_snapshot,
+)
 from server.state import STATE
 
 
@@ -67,6 +76,10 @@ SCAN_RATE_LIMIT = int(os.getenv("CODEWEAVE_RATE_LIMIT_SCAN", "10"))
 CHAT_RATE_LIMIT = int(os.getenv("CODEWEAVE_RATE_LIMIT_CHAT", "20"))
 HISTORY_RATE_LIMIT = int(os.getenv("CODEWEAVE_RATE_LIMIT_HISTORY", "30"))
 RATE_WINDOW_SECONDS = int(os.getenv("CODEWEAVE_RATE_LIMIT_WINDOW", "60"))
+SCAN_TIMEOUT_SECONDS = max(10, int(os.getenv("CODEWEAVE_SCAN_TIMEOUT_SECONDS", "180")))
+HISTORY_TIMEOUT_SECONDS = max(10, int(os.getenv("CODEWEAVE_HISTORY_TIMEOUT_SECONDS", "180")))
+MAX_REQUEST_BYTES = max(1024, int(os.getenv("CODEWEAVE_MAX_REQUEST_BYTES", str(1024 * 1024))))
+app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
 
 
 def _parse_allowed_local_roots() -> list[Path]:
@@ -103,6 +116,15 @@ def handle_api_error(exc: ApiError) -> Any:
     return from_api_error(exc)
 
 
+@app.errorhandler(RequestEntityTooLarge)
+def handle_large_payload(_exc: RequestEntityTooLarge) -> Any:
+    return error_response(
+        "payload_too_large",
+        f"Request body exceeds max size of {MAX_REQUEST_BYTES} bytes.",
+        413,
+    )
+
+
 @app.before_request
 def _setup_request_context() -> None:
     request_id = str(request.headers.get("X-Request-Id") or uuid.uuid4())
@@ -112,9 +134,33 @@ def _setup_request_context() -> None:
     STATE.reset()
 
 
-def _scan_repository(scan_root: Path, language: str, **options: Any) -> dict[str, Any]:
+def _run_with_timeout(
+    *,
+    timeout_seconds: int,
+    failure_code: str,
+    failure_message: str,
+    fn: Any,
+    args: tuple[Any, ...] = (),
+    **kwargs: Any,
+) -> Any:
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="codeweave-timeout-guard") as executor:
+        future = executor.submit(fn, *args, **kwargs)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except FutureTimeoutError as exc:
+            raise ApiError(failure_code, failure_message, 504) from exc
+
+
+def _scan_repository(scan_root: Path, language: str, timeout_seconds: int, **options: Any) -> dict[str, Any]:
     plugin = get_plugin(language)
-    return plugin.scan(str(scan_root), **options)
+    return _run_with_timeout(
+        timeout_seconds=timeout_seconds,
+        failure_code="scan_timeout",
+        failure_message=f"Scan timed out after {timeout_seconds}s.",
+        fn=plugin.scan,
+        args=(str(scan_root),),
+        **options,
+    )
 
 
 def _load_latest_scan(identity: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -152,7 +198,46 @@ def _perform_scan(identity: str, path_value: str, language: str) -> dict[str, An
         allowed_local_roots=ALLOWED_LOCAL_ROOTS,
         allowed_github_hosts=ALLOWED_GITHUB_HOSTS,
     )
-    graph_data = _scan_repository(scan_root, language)
+    revision = get_head_commit_hash(scan_root) if is_git_repo(scan_root) else ""
+    previous_graph, previous_context = _load_latest_scan(identity)
+
+    if (
+        previous_graph is not None
+        and previous_context is not None
+        and str(previous_context.get("target") or "") == normalized_target
+        and str(previous_context.get("language") or "") == language
+        and str(previous_context.get("scan_revision") or "") == revision
+        and revision
+    ):
+        previous_graph.setdefault("meta", {})
+        previous_graph["meta"]["incremental_reused"] = True
+        return previous_graph
+
+    if revision:
+        disk_cached = load_scan_snapshot(
+            target=normalized_target,
+            language=language,
+            revision=revision,
+            source_kind=source_kind,
+        )
+        if isinstance(disk_cached, dict):
+            disk_cached.setdefault("meta", {})
+            disk_cached["meta"]["incremental_reused"] = True
+            scan_context = {
+                "project_input": path_value,
+                "target": normalized_target,
+                "scan_root": str(scan_root),
+                "language": language,
+                "is_git_repo": True,
+                "source_kind": source_kind,
+                "scan_revision": revision,
+            }
+            _persist_scan(identity, disk_cached, scan_context)
+            return disk_cached
+
+    graph_data = _scan_repository(scan_root, language, timeout_seconds=SCAN_TIMEOUT_SECONDS)
+    graph_data.setdefault("meta", {})
+    graph_data["meta"]["incremental_reused"] = False
     scan_context = {
         "project_input": path_value,
         "target": normalized_target,
@@ -160,7 +245,16 @@ def _perform_scan(identity: str, path_value: str, language: str) -> dict[str, An
         "language": language,
         "is_git_repo": is_git_repo(scan_root),
         "source_kind": source_kind,
+        "scan_revision": revision,
     }
+    if revision:
+        save_scan_snapshot(
+            target=normalized_target,
+            language=language,
+            revision=revision,
+            source_kind=source_kind,
+            graph_data=graph_data,
+        )
     _persist_scan(identity, graph_data, scan_context)
     return graph_data
 
@@ -175,15 +269,29 @@ def _perform_history_snapshot(identity: str, commit_hash: str) -> dict[str, Any]
         validated_commit_hash = validate_commit_hash(commit_hash)
         repo_root = Path(str(scan_context.get("scan_root") or "")).resolve()
         language = str(scan_context.get("language") or "python")
+        cached_history = load_history_snapshot(repo_root=repo_root, commit_hash=validated_commit_hash, language=language)
+        if isinstance(cached_history, dict):
+            cached_history.setdefault("meta", {})
+            cached_history["meta"]["history_cached"] = True
+            return cached_history
         snapshot_root = extract_commit_snapshot(repo_root, validated_commit_hash)
         history_graph = _scan_repository(
             snapshot_root,
             language,
+            timeout_seconds=HISTORY_TIMEOUT_SECONDS,
             include_summaries=False,
             include_mutation_tracking=False,
         )
         history_graph.setdefault("meta", {})
-        history_graph["meta"].update({"history_commit": validated_commit_hash, "history_mode": True})
+        history_graph["meta"].update(
+            {"history_commit": validated_commit_hash, "history_mode": True, "history_cached": False}
+        )
+        save_history_snapshot(
+            repo_root=repo_root,
+            commit_hash=validated_commit_hash,
+            language=language,
+            graph_data=history_graph,
+        )
         return history_graph
     finally:
         if snapshot_root is not None:

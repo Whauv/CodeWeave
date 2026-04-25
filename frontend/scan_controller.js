@@ -13,6 +13,7 @@
       syncHistoryButtons,
       updateGraph,
     } = deps;
+    const REQUEST_TIMEOUT_MS = 35000;
 
     function getDom(id) {
       return document.getElementById(id);
@@ -44,7 +45,7 @@
     async function fetchJsonWithFallback(urls, options = {}) {
       let lastError = "Request failed";
       for (const url of urls) {
-        const response = await fetch(url, options);
+        const response = await fetchWithTimeout(url, options);
         const data = await parseJsonResponse(response, { allowNonJsonError: true });
         if (response.ok) {
           return { response, data };
@@ -56,6 +57,16 @@
         }
       }
       throw new Error(lastError);
+    }
+
+    async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(url, { ...options, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     function resetScanMetrics() {
@@ -287,8 +298,9 @@
           }
 
           for (let attempt = 0; attempt < 180; attempt += 1) {
-            await new Promise((resolve) => setTimeout(resolve, 500));
-            const statusResponse = await fetch(`/api/v1/jobs/${jobId}`);
+            const delayMs = Math.min(1400, 220 + attempt * 20);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            const statusResponse = await fetchWithTimeout(`/api/v1/jobs/${jobId}`);
             const statusData = await parseJsonResponse(statusResponse);
             if (!statusResponse.ok) {
               throw new Error(statusData.error || "Failed to read scan job status");
@@ -300,7 +312,7 @@
             if (status === "failed") {
               throw new Error(statusData.error || "Scan job failed");
             }
-            const resultResponse = await fetch(`/api/v1/jobs/${jobId}/result`);
+            const resultResponse = await fetchWithTimeout(`/api/v1/jobs/${jobId}/result`);
             const resultData = await parseJsonResponse(resultResponse);
             if (!resultResponse.ok) {
               throw new Error(resultData.error || "Failed to read scan result");

@@ -10,10 +10,74 @@
       updateGraph,
       highlightNode,
     } = deps;
+    const REQUEST_TIMEOUT_MS = 35000;
     let queuedHistoryIndex = null;
     let queuedHistoryOptions = null;
     let playbackLoopActive = false;
     let previousSnapshot = null;
+    let transformWorker = null;
+    let transformWorkerSeq = 0;
+
+    function ensureTransformWorker() {
+      if (transformWorker || typeof Worker === "undefined") {
+        return transformWorker;
+      }
+      try {
+        transformWorker = new Worker("/history_transform_worker.js");
+      } catch (_error) {
+        transformWorker = null;
+      }
+      return transformWorker;
+    }
+
+    async function computeSnapshotTransformWithWorker(nextSnapshot) {
+      const worker = ensureTransformWorker();
+      if (!worker) {
+        const transition = buildSnapshotChangeSet(nextSnapshot);
+        const snapshotWithColors = applyEvolutionMutationColors(nextSnapshot, transition);
+        return { transition, snapshotWithColors };
+      }
+
+      const state = getState();
+      const previousNodes = Array.isArray(previousSnapshot?.nodes) ? previousSnapshot.nodes : [];
+      const nextNodes = Array.isArray(nextSnapshot?.nodes) ? nextSnapshot.nodes : [];
+      const liveNodes = Array.isArray(state.liveGraphSnapshot?.nodes) ? state.liveGraphSnapshot.nodes : [];
+      const requestId = `hist-transform-${Date.now()}-${transformWorkerSeq++}`;
+
+      const result = await new Promise((resolve, reject) => {
+        const onMessage = (event) => {
+          const payload = event?.data || {};
+          if (payload.requestId !== requestId) {
+            return;
+          }
+          worker.removeEventListener("message", onMessage);
+          worker.removeEventListener("error", onError);
+          if (!payload.ok) {
+            reject(new Error(payload.error || "history transform failed"));
+            return;
+          }
+          resolve(payload.result || {});
+        };
+        const onError = (event) => {
+          worker.removeEventListener("message", onMessage);
+          worker.removeEventListener("error", onError);
+          reject(new Error(event?.message || "history transform worker crashed"));
+        };
+        worker.addEventListener("message", onMessage);
+        worker.addEventListener("error", onError);
+        worker.postMessage({
+          type: "compute_snapshot_transform",
+          requestId,
+          previousNodes,
+          nextNodes,
+          liveNodes,
+        });
+      });
+
+      const transition = result.transition || { added: [], removed: [], updated: [] };
+      const decoratedNodes = Array.isArray(result.decoratedNodes) ? result.decoratedNodes : nextNodes;
+      return { transition, snapshotWithColors: { ...nextSnapshot, nodes: decoratedNodes } };
+    }
 
     async function parseJsonResponse(response, options = {}) {
       const { allowNonJsonError = false } = options;
@@ -37,7 +101,7 @@
     async function fetchJsonWithFallback(urls, options = {}) {
       let lastError = "Request failed";
       for (const url of urls) {
-        const response = await fetch(url, options);
+        const response = await fetchWithTimeout(url, options);
         const data = await parseJsonResponse(response, { allowNonJsonError: true });
         if (response.ok) {
           return { response, data };
@@ -49,6 +113,16 @@
         }
       }
       throw new Error(lastError);
+    }
+
+    async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(url, { ...options, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     function normalizePathTail(pathValue) {
@@ -231,8 +305,9 @@
             }
 
             for (let attempt = 0; attempt < 180; attempt += 1) {
-              await new Promise((resolve) => setTimeout(resolve, 450));
-              const statusResponse = await fetch(`/api/v1/jobs/${jobId}`);
+              const delayMs = Math.min(1400, 240 + attempt * 20);
+              await new Promise((resolve) => setTimeout(resolve, delayMs));
+              const statusResponse = await fetchWithTimeout(`/api/v1/jobs/${jobId}`);
               const statusData = await parseJsonResponse(statusResponse);
               if (!statusResponse.ok) {
                 throw new Error(statusData.error || "Failed to read history snapshot job status");
@@ -244,7 +319,7 @@
               if (status === "failed") {
                 throw new Error(statusData.error || "History snapshot job failed");
               }
-              const resultResponse = await fetch(`/api/v1/jobs/${jobId}/result`);
+              const resultResponse = await fetchWithTimeout(`/api/v1/jobs/${jobId}/result`);
               const resultData = await parseJsonResponse(resultResponse);
               if (!resultResponse.ok) {
                 throw new Error(resultData.error || "Failed to read history snapshot result");
@@ -280,8 +355,9 @@
         if (searchInput) {
           searchInput.value = "";
         }
-        const transition = buildSnapshotChangeSet(snapshot);
-        const snapshotWithColors = applyEvolutionMutationColors(snapshot, transition);
+        const transformed = await computeSnapshotTransformWithWorker(snapshot);
+        const transition = transformed.transition;
+        const snapshotWithColors = transformed.snapshotWithColors;
         updateGraph(snapshotWithColors, { instantRender: true, historySnapshot: true });
         deps.applyHistoryTransition?.(transition);
         setMode("History");
@@ -546,7 +622,7 @@
         let data = null;
         let requestError = null;
         for (const url of candidateUrls) {
-          const response = await fetch(url);
+          const response = await fetchWithTimeout(url);
           const { data: payload, rawText } = await parseApiPayload(response);
           if (response.ok) {
             data = payload && typeof payload === "object"
