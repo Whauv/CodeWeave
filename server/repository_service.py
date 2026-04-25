@@ -174,6 +174,13 @@ def get_head_branch(repo_root: Path) -> str:
     return (result.stdout or "HEAD").strip()
 
 
+def get_head_commit_hash(repo_root: Path) -> str:
+    result = run_git_command(repo_root, ["rev-parse", "HEAD"], timeout=60)
+    if result.returncode != 0:
+        return ""
+    return (result.stdout or "").strip()
+
+
 def is_shallow_repository(repo_root: Path) -> bool:
     result = run_git_command(repo_root, ["rev-parse", "--is-shallow-repository"], timeout=60)
     if result.returncode != 0:

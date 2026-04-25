@@ -4,10 +4,13 @@ import traceback
 import uuid
 from concurrent.futures import Future
 from dataclasses import dataclass
+import os
 from threading import Lock
+import time
 from typing import Any, Callable
 
 from server import db
+from server.errors import ApiError
 from server.queue_worker import QueueWorker
 
 
@@ -27,6 +30,14 @@ class JobManager:
         self._worker = QueueWorker()
         self._jobs: dict[str, _RuntimeJob] = {}
         self._lock = Lock()
+        self._max_retries = max(0, int(os.getenv("CODEWEAVE_JOB_MAX_RETRIES", "2")))
+        self._base_backoff_seconds = max(0.1, float(os.getenv("CODEWEAVE_JOB_BACKOFF_SECONDS", "0.4")))
+
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        if isinstance(exc, ApiError):
+            return int(exc.status_code) >= 500
+        return True
 
     def submit(self, *, identity: str, job_type: str, payload: dict[str, Any], handler: JobHandler) -> str:
         job_id = str(uuid.uuid4())
@@ -34,28 +45,44 @@ class JobManager:
 
         def run() -> dict[str, Any]:
             db.save_job(job_id=job_id, identity=identity, job_type=job_type, status="running", payload=payload)
-            try:
-                result = handler(identity, payload)
-                db.save_job(
-                    job_id=job_id,
-                    identity=identity,
-                    job_type=job_type,
-                    status="succeeded",
-                    payload=payload,
-                    result=result,
-                )
-                return result
-            except Exception as exc:
-                message = str(exc) or "Job failed"
-                db.save_job(
-                    job_id=job_id,
-                    identity=identity,
-                    job_type=job_type,
-                    status="failed",
-                    payload=payload,
-                    error_message=f"{message}\n{traceback.format_exc(limit=5)}",
-                )
-                raise
+            attempts = 0
+            while True:
+                attempts += 1
+                try:
+                    result = handler(identity, payload)
+                    db.save_job(
+                        job_id=job_id,
+                        identity=identity,
+                        job_type=job_type,
+                        status="succeeded",
+                        payload=payload,
+                        result=result,
+                    )
+                    return result
+                except Exception as exc:
+                    retryable = self._is_retryable(exc)
+                    if attempts <= self._max_retries and retryable:
+                        db.save_job(
+                            job_id=job_id,
+                            identity=identity,
+                            job_type=job_type,
+                            status="running",
+                            payload=payload,
+                            error_message=f"Retrying after attempt {attempts}: {exc}",
+                        )
+                        delay = min(self._base_backoff_seconds * (2 ** (attempts - 1)), 5.0)
+                        time.sleep(delay)
+                        continue
+                    message = str(exc) or "Job failed"
+                    db.save_job(
+                        job_id=job_id,
+                        identity=identity,
+                        job_type=job_type,
+                        status="failed",
+                        payload=payload,
+                        error_message=f"{message}\n{traceback.format_exc(limit=5)}",
+                    )
+                    raise
 
         future = self._worker.submit(run)
         with self._lock:
