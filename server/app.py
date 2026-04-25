@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import sys
 import time
@@ -9,6 +10,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from pathlib import Path
 from typing import Any
+from urllib.request import Request, urlopen
 
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
@@ -54,6 +56,7 @@ from server.repository_service import (
     is_git_repo,
     list_repo_commits,
     resolve_scan_source,
+    run_git_command,
 )
 from server.schemas import parse_chat_request, parse_scan_request, validate_commit_hash
 from server.sentry_config import capture_exception, init_sentry
@@ -92,7 +95,13 @@ MAX_REQUEST_BYTES = max(1024, int(os.getenv("CODEWEAVE_MAX_REQUEST_BYTES", str(1
 SCAN_TTL_DAYS = max(1, int(os.getenv("CODEWEAVE_SCAN_TTL_DAYS", "30")))
 JOB_TTL_DAYS = max(1, int(os.getenv("CODEWEAVE_JOB_TTL_DAYS", "14")))
 AUDIT_TTL_DAYS = max(1, int(os.getenv("CODEWEAVE_AUDIT_TTL_DAYS", "30")))
+SHARE_LINK_TTL_HOURS = max(1, int(os.getenv("CODEWEAVE_SHARE_LINK_TTL_HOURS", "168")))
+INVESTIGATION_TTL_DAYS = max(1, int(os.getenv("CODEWEAVE_INVESTIGATION_TTL_DAYS", "30")))
 app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
+PR_URL_PATTERN = re.compile(
+    r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)(?:/.*)?$",
+    flags=re.IGNORECASE,
+)
 
 
 def _parse_allowed_local_roots() -> list[Path]:
@@ -450,6 +459,131 @@ def _history_diff_impl(from_commit: str, to_commit: str) -> Any:
     return jsonify(diff_data)
 
 
+def _parse_pr_url(pr_url: str) -> tuple[str, str, str]:
+    value = str(pr_url or "").strip()
+    match = PR_URL_PATTERN.match(value)
+    if not match:
+        raise ApiError(
+            "invalid_pr_url",
+            "PR URL must look like https://github.com/<owner>/<repo>/pull/<number>",
+            400,
+        )
+    owner = match.group("owner").strip()
+    repo = match.group("repo").strip()
+    number = match.group("number").strip()
+    return owner, repo, number
+
+
+def _fetch_github_pr_refs(owner: str, repo: str, number: str) -> tuple[str, str] | None:
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}"
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "codeweave-pr-analyzer"}
+    token = str(os.getenv("GITHUB_TOKEN", "")).strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request_obj = Request(api_url, headers=headers, method="GET")
+    try:
+        with urlopen(request_obj, timeout=8) as response:  # nosec: B310 - user-provided URL is normalized to GitHub API domain.
+            payload_text = response.read().decode("utf-8")
+    except Exception:
+        return None
+    try:
+        import json
+
+        payload = json.loads(payload_text)
+    except Exception:
+        return None
+    base_sha = str(((payload or {}).get("base") or {}).get("sha") or "").strip()
+    head_sha = str(((payload or {}).get("head") or {}).get("sha") or "").strip()
+    if not base_sha or not head_sha:
+        return None
+    return base_sha, head_sha
+
+
+def _guess_changed_files_for_pr(repo_root: Path, pr_url: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    owner, repo, number = _parse_pr_url(pr_url)
+    refs = _fetch_github_pr_refs(owner, repo, number)
+    if refs:
+        base_sha, head_sha = refs
+        try:
+            diff_data = diff_commits(repo_root, base_sha, head_sha, max_files=200)
+            return list(diff_data.get("changed_files") or []), {
+                "base_commit": base_sha,
+                "head_commit": head_sha,
+                "source": "github_api",
+                "shortstat": diff_data.get("shortstat"),
+            }
+        except Exception:
+            pass
+
+    fallback = run_git_command(repo_root, ["diff", "--name-status", "HEAD~1", "HEAD"], timeout=90)
+    if fallback.returncode != 0:
+        raise ApiError("pr_diff_unavailable", "Could not compute changed files for this PR.", 400)
+    changed_files: list[dict[str, Any]] = []
+    for line in (fallback.stdout or "").splitlines():
+        parts = line.strip().split("\t")
+        if len(parts) >= 2:
+            status = (parts[0] or "M")[0]
+            if status == "R" and len(parts) >= 3:
+                changed_files.append({"status": "R", "old_path": parts[1], "path": parts[2]})
+            else:
+                changed_files.append({"status": status, "path": parts[1]})
+    return changed_files, {"base_commit": "HEAD~1", "head_commit": "HEAD", "source": "local_fallback"}
+
+
+def _normalize_file_path(value: str) -> str:
+    return str(value or "").replace("\\", "/").lower().lstrip("./")
+
+
+def _map_changed_files_to_nodes(
+    graph_data: dict[str, Any],
+    changed_files: list[dict[str, Any]],
+) -> dict[str, Any]:
+    nodes = list(graph_data.get("nodes") or [])
+    normalized_nodes: list[tuple[dict[str, Any], str]] = [
+        (node, _normalize_file_path(str(node.get("file") or ""))) for node in nodes
+    ]
+    impacted: dict[str, dict[str, Any]] = {}
+    unmatched_files: list[str] = []
+    for change in changed_files:
+        change_path = _normalize_file_path(str(change.get("path") or ""))
+        if not change_path:
+            continue
+        matched_any = False
+        for node, node_file in normalized_nodes:
+            if not node_file:
+                continue
+            if node_file == change_path or node_file.endswith(f"/{change_path}") or change_path.endswith(f"/{node_file}"):
+                node_id = str(node.get("id") or "")
+                if not node_id:
+                    continue
+                matched_any = True
+                if node_id not in impacted:
+                    impacted[node_id] = {
+                        "id": node_id,
+                        "name": str(node.get("name") or node_id),
+                        "file": str(node.get("file") or ""),
+                        "status": str(change.get("status") or "M"),
+                        "churn_count": int(node.get("churn_count") or 0),
+                        "mutation_status": str(node.get("mutation_status") or "stable"),
+                    }
+                else:
+                    if impacted[node_id]["status"] != "R":
+                        impacted[node_id]["status"] = str(change.get("status") or impacted[node_id]["status"])
+        if not matched_any:
+            unmatched_files.append(change_path)
+    impacted_nodes = sorted(
+        impacted.values(),
+        key=lambda entry: (int(entry.get("churn_count") or 0), str(entry.get("name") or "").lower()),
+        reverse=True,
+    )
+    hotspots = impacted_nodes[:12]
+    return {
+        "impacted_nodes": impacted_nodes[:120],
+        "hotspots": hotspots,
+        "unmatched_files": unmatched_files[:80],
+    }
+
+
 @app.get("/health/live")
 def health_live() -> Any:
     return jsonify({"status": "ok", "service": "codeweave"})
@@ -559,6 +693,172 @@ def run_cleanup() -> Any:
         audit_ttl_days=max(1, audit_ttl_days),
     )
     return jsonify({"ok": True, "cleanup": summary})
+
+
+@app.get("/api/v1/workspaces")
+@require_auth
+def list_workspaces_v1() -> Any:
+    try:
+        workspaces = db.list_workspaces(identity=get_request_identity())
+        return jsonify({"workspaces": workspaces})
+    except Exception as exc:
+        LOGGER.exception("Workspace list failed: %s", exc)
+        return error_response("workspace_list_failed", "Could not list workspaces.", 500)
+
+
+@app.post("/api/v1/workspaces")
+@require_auth
+def create_workspace_v1() -> Any:
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        raise ApiError("invalid_request_body", "Request body must be a JSON object.", 400)
+    try:
+        workspace = db.create_workspace(identity=get_request_identity(), name=str(payload.get("name") or ""))
+        return jsonify({"workspace": workspace}), 201
+    except ValueError as exc:
+        raise ApiError("invalid_workspace", str(exc), 400) from exc
+    except Exception as exc:
+        LOGGER.exception("Workspace create failed: %s", exc)
+        return error_response("workspace_create_failed", "Could not create workspace.", 500)
+
+
+@app.post("/api/v1/workspaces/<int:workspace_id>/members")
+@require_auth
+def add_workspace_member_v1(workspace_id: int) -> Any:
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        raise ApiError("invalid_request_body", "Request body must be a JSON object.", 400)
+    try:
+        member = db.add_workspace_member(
+            identity=get_request_identity(),
+            workspace_id=workspace_id,
+            member_identity=str(payload.get("identity") or ""),
+            role=str(payload.get("role") or "member"),
+        )
+        return jsonify({"member": member})
+    except PermissionError as exc:
+        raise ApiError("workspace_forbidden", str(exc), 403) from exc
+    except ValueError as exc:
+        raise ApiError("invalid_workspace_member", str(exc), 400) from exc
+
+
+@app.post("/api/v1/share-links")
+@require_auth
+def create_share_link_v1() -> Any:
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        raise ApiError("invalid_request_body", "Request body must be a JSON object.", 400)
+    workspace_id_raw = payload.get("workspace_id")
+    workspace_id = int(workspace_id_raw) if workspace_id_raw is not None else None
+    state_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+    ttl_hours = payload.get("expires_hours", SHARE_LINK_TTL_HOURS)
+    try:
+        ttl_hours_value = max(1, int(ttl_hours))
+    except (TypeError, ValueError) as exc:
+        raise ApiError("invalid_share_ttl", "expires_hours must be an integer.", 400) from exc
+    try:
+        share_link = db.create_share_link(
+            identity=get_request_identity(),
+            payload=state_payload,
+            workspace_id=workspace_id,
+            expires_hours=ttl_hours_value,
+        )
+        token = str(share_link.get("token") or "")
+        share_url = f"{request.host_url.rstrip('/')}/?share={token}"
+        return jsonify({"share_link": {**share_link, "url": share_url}}), 201
+    except PermissionError as exc:
+        raise ApiError("workspace_forbidden", str(exc), 403) from exc
+    except ValueError as exc:
+        raise ApiError("invalid_share_payload", str(exc), 400) from exc
+
+
+@app.get("/api/v1/share-links/<token>")
+@require_auth
+def resolve_share_link_v1(token: str) -> Any:
+    try:
+        resolved = db.resolve_share_link(identity=get_request_identity(), token=token)
+        if not resolved:
+            raise ApiError("share_link_not_found", "Share link not found or expired.", 404)
+        return jsonify({"share_link": resolved})
+    except PermissionError as exc:
+        raise ApiError("workspace_forbidden", str(exc), 403) from exc
+
+
+@app.get("/api/v1/investigations")
+@require_auth
+def list_investigations_v1() -> Any:
+    workspace_id_raw = request.args.get("workspace_id")
+    workspace_id: int | None = None
+    if workspace_id_raw:
+        try:
+            workspace_id = int(workspace_id_raw)
+        except ValueError as exc:
+            raise ApiError("invalid_workspace_id", "workspace_id must be an integer.", 400) from exc
+    investigations = db.list_investigation_sessions(identity=get_request_identity(), workspace_id=workspace_id)
+    return jsonify({"sessions": investigations})
+
+
+@app.post("/api/v1/investigations")
+@require_auth
+def create_investigation_v1() -> Any:
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        raise ApiError("invalid_request_body", "Request body must be a JSON object.", 400)
+    workspace_id_raw = payload.get("workspace_id")
+    workspace_id = int(workspace_id_raw) if workspace_id_raw is not None else None
+    state_payload = payload.get("state") if isinstance(payload.get("state"), dict) else {}
+    ttl_days_raw = payload.get("ttl_days", INVESTIGATION_TTL_DAYS)
+    try:
+        ttl_days = max(1, int(ttl_days_raw))
+    except (TypeError, ValueError) as exc:
+        raise ApiError("invalid_session_ttl", "ttl_days must be an integer.", 400) from exc
+    try:
+        session = db.create_investigation_session(
+            identity=get_request_identity(),
+            title=str(payload.get("title") or ""),
+            notes=str(payload.get("notes") or ""),
+            workspace_id=workspace_id,
+            state=state_payload,
+            ttl_days=ttl_days,
+        )
+        return jsonify({"session": session}), 201
+    except PermissionError as exc:
+        raise ApiError("workspace_forbidden", str(exc), 403) from exc
+    except ValueError as exc:
+        raise ApiError("invalid_session", str(exc), 400) from exc
+
+
+@app.get("/api/v1/investigations/<int:session_id>")
+@require_auth
+def get_investigation_v1(session_id: int) -> Any:
+    session = db.get_investigation_session(identity=get_request_identity(), session_id=session_id)
+    if not session:
+        raise ApiError("investigation_not_found", "Investigation session not found.", 404)
+    return jsonify({"session": session})
+
+
+@app.patch("/api/v1/investigations/<int:session_id>")
+@require_auth
+def update_investigation_v1(session_id: int) -> Any:
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        raise ApiError("invalid_request_body", "Request body must be a JSON object.", 400)
+    state_payload = payload.get("state")
+    if state_payload is not None and not isinstance(state_payload, dict):
+        raise ApiError("invalid_session_state", "state must be a JSON object.", 400)
+    try:
+        session = db.update_investigation_session(
+            identity=get_request_identity(),
+            session_id=session_id,
+            title=str(payload.get("title")).strip() if "title" in payload else None,
+            notes=str(payload.get("notes")) if "notes" in payload else None,
+            state=state_payload,
+        )
+        if not session:
+            raise ApiError("investigation_not_found", "Investigation session not found.", 404)
+        return jsonify({"session": session})
+    except PermissionError as exc:
+        raise ApiError("investigation_forbidden", str(exc), 403) from exc
 
 
 @app.get("/api/v1/jobs/<job_id>")
@@ -677,6 +977,50 @@ def chat_about_node_v1() -> Any:
 @app.post("/api/chat")
 def chat_about_node_legacy() -> Any:
     return chat_about_node_v1()
+
+
+@app.post("/api/v1/pr/analyze")
+@require_auth
+@rate_limit(HISTORY_RATE_LIMIT, RATE_WINDOW_SECONDS)
+def analyze_pull_request_v1() -> Any:
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        raise ApiError("invalid_request_body", "Request body must be a JSON object.", 400)
+    pr_url = str(payload.get("pr_url") or "").strip()
+    if not pr_url:
+        raise ApiError("missing_pr_url", "pr_url is required.", 400)
+
+    graph_data, scan_context = _load_latest_scan(get_request_identity())
+    if not isinstance(graph_data, dict) or not isinstance(scan_context, dict):
+        raise ApiError("graph_not_scanned", "No graph scanned yet", 404)
+    repo_root = Path(str(scan_context.get("scan_root") or "")).resolve()
+    if not is_git_repo(repo_root):
+        raise ApiError("pr_analysis_requires_git_repo", "PR analysis requires a git-backed scan target.", 400)
+
+    try:
+        owner, repo, number = _parse_pr_url(pr_url)
+        repo_hint = f"{owner}/{repo}#{number}"
+        changed_files, diff_meta = _guess_changed_files_for_pr(repo_root, pr_url)
+        mapped = _map_changed_files_to_nodes(graph_data, changed_files)
+        return jsonify(
+            {
+                "pr_url": pr_url,
+                "repo_hint": repo_hint,
+                "changed_files": changed_files,
+                "changed_file_count": len(changed_files),
+                "impacted_nodes": mapped["impacted_nodes"],
+                "hotspots": mapped["hotspots"],
+                "unmatched_files": mapped["unmatched_files"],
+                "diff_meta": diff_meta,
+            }
+        )
+    except ApiError:
+        raise
+    except ValueError as exc:
+        raise ApiError("pr_analysis_failed", str(exc), 400) from exc
+    except Exception as exc:
+        LOGGER.exception("PR analysis failed: %s", exc)
+        return error_response("pr_analysis_failed", "Could not analyze pull request.", 500)
 
 
 @app.get("/api/v1/history")

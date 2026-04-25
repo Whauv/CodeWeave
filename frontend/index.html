@@ -2094,6 +2094,45 @@
               <button id="export-action-plan-btn" class="panel-action" disabled>Export Markdown</button>
             </div>
           </div>
+
+          <div class="panel-card">
+            <div class="panel-label">Collaboration</div>
+            <div class="list-wrap">
+              <div class="muted">Team workspace</div>
+              <div class="panel-actions">
+                <select id="workspace-select" class="panel-action">
+                  <option value="">Personal</option>
+                </select>
+                <button id="workspace-refresh-btn" class="panel-action">Refresh</button>
+              </div>
+              <div class="panel-actions">
+                <input id="workspace-name-input" class="panel-action" type="text" placeholder="New workspace name" />
+                <button id="workspace-create-btn" class="panel-action">Create</button>
+              </div>
+              <div class="muted">Share current view</div>
+              <div class="panel-actions">
+                <button id="share-link-create-btn" class="panel-action">Create Share Link</button>
+                <input id="share-link-token-input" class="panel-action" type="text" placeholder="Share token or URL" />
+                <button id="share-link-load-btn" class="panel-action">Load Share</button>
+              </div>
+              <div id="share-link-output" class="muted">No share link created yet.</div>
+              <hr style="border-color: var(--border); opacity: 0.5;" />
+              <div class="muted">Investigation sessions</div>
+              <div class="panel-actions">
+                <input id="investigation-title-input" class="panel-action" type="text" placeholder="Session title" />
+                <button id="investigation-save-btn" class="panel-action">Save Session</button>
+                <button id="investigation-refresh-btn" class="panel-action">Refresh Sessions</button>
+              </div>
+              <div id="investigation-session-list" class="list-wrap">No saved sessions yet.</div>
+              <hr style="border-color: var(--border); opacity: 0.5;" />
+              <div class="muted">PR-aware analysis</div>
+              <div class="panel-actions">
+                <input id="pr-url-input" class="panel-action" type="text" placeholder="https://github.com/org/repo/pull/123" />
+                <button id="pr-analyze-btn" class="panel-action">Analyze PR</button>
+              </div>
+              <div id="pr-analysis-results" class="list-wrap">Analyze a PR URL to highlight impacted regions.</div>
+            </div>
+          </div>
         </div>
 
         <div class="detail-placeholder">
