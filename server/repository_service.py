@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import io
 import hashlib
+import ipaddress
 import logging
+import socket
 import shutil
 import subprocess
 import tarfile
@@ -20,12 +22,53 @@ MAX_ARCHIVE_TOTAL_SIZE_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 50000
 
 
+def _is_public_ip(ip_value: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(ip_value)
+    except ValueError:
+        return False
+    return not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def _assert_public_hostname(hostname: str) -> None:
+    lowered = str(hostname or "").strip().lower()
+    if not lowered:
+        raise ValueError("Repository host is missing")
+    try:
+        parsed_ip = ipaddress.ip_address(lowered)
+    except ValueError:
+        parsed_ip = None
+    if parsed_ip is not None:
+        if not _is_public_ip(str(parsed_ip)):
+            raise ValueError("Private or loopback repository hosts are not allowed")
+        return
+    try:
+        infos = socket.getaddrinfo(lowered, 443, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f"Could not resolve repository host: {lowered}") from exc
+    resolved_ips = {info[4][0] for info in infos if info and len(info) >= 5 and info[4]}
+    if not resolved_ips:
+        raise ValueError(f"Could not resolve repository host: {lowered}")
+    for resolved_ip in resolved_ips:
+        if not _is_public_ip(resolved_ip):
+            raise ValueError("Private or loopback repository hosts are not allowed")
+
+
 def normalize_github_repo_url(url_value: str, allowed_hosts: set[str] | None = None) -> str:
     allowed_host_values = {host.lower().strip() for host in (allowed_hosts or DEFAULT_ALLOWED_GITHUB_HOSTS) if host.strip()}
     parsed = urlparse(url_value.strip())
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("GitHub URL must start with http:// or https://")
-    if parsed.netloc.lower() not in allowed_host_values:
+    hostname = str(parsed.hostname or "").lower().strip()
+    _assert_public_hostname(hostname)
+    if hostname not in allowed_host_values:
         hosts = ", ".join(sorted(allowed_host_values))
         raise ValueError(f"Only approved Git hosts are supported: {hosts}")
 

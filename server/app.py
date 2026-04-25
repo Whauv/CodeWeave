@@ -31,7 +31,13 @@ from graph import blast_radius
 from plugins import get_language_options, get_plugin
 from server import db
 from server.action_plan_service import build_action_plan
-from server.auth import get_request_identity, require_auth, set_request_identity
+from server.auth import (
+    build_security_tokens,
+    get_request_identity,
+    issue_security_cookies,
+    require_auth,
+    set_request_identity,
+)
 from server.chat_service import chat_with_provider
 from server.errors import ApiError, error_response, from_api_error
 from server.jobs import JOBS
@@ -79,6 +85,9 @@ RATE_WINDOW_SECONDS = int(os.getenv("CODEWEAVE_RATE_LIMIT_WINDOW", "60"))
 SCAN_TIMEOUT_SECONDS = max(10, int(os.getenv("CODEWEAVE_SCAN_TIMEOUT_SECONDS", "180")))
 HISTORY_TIMEOUT_SECONDS = max(10, int(os.getenv("CODEWEAVE_HISTORY_TIMEOUT_SECONDS", "180")))
 MAX_REQUEST_BYTES = max(1024, int(os.getenv("CODEWEAVE_MAX_REQUEST_BYTES", str(1024 * 1024))))
+SCAN_TTL_DAYS = max(1, int(os.getenv("CODEWEAVE_SCAN_TTL_DAYS", "30")))
+JOB_TTL_DAYS = max(1, int(os.getenv("CODEWEAVE_JOB_TTL_DAYS", "14")))
+AUDIT_TTL_DAYS = max(1, int(os.getenv("CODEWEAVE_AUDIT_TTL_DAYS", "30")))
 app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
 
 
@@ -109,6 +118,15 @@ def _parse_allowed_github_hosts() -> set[str]:
 
 ALLOWED_LOCAL_ROOTS = _parse_allowed_local_roots()
 ALLOWED_GITHUB_HOSTS = _parse_allowed_github_hosts()
+try:
+    cleanup_summary = db.cleanup_expired_artifacts(
+        scan_ttl_days=SCAN_TTL_DAYS,
+        job_ttl_days=JOB_TTL_DAYS,
+        audit_ttl_days=AUDIT_TTL_DAYS,
+    )
+    LOGGER.info("Startup TTL cleanup complete: %s", cleanup_summary)
+except Exception as cleanup_error:
+    LOGGER.warning("Startup TTL cleanup failed: %s", cleanup_error)
 
 
 @app.errorhandler(ApiError)
@@ -132,6 +150,35 @@ def _setup_request_context() -> None:
     identity_hint = str(request.headers.get("X-Codeweave-User") or request.remote_addr or "anonymous")
     set_request_identity(identity_hint)
     STATE.reset()
+
+
+@app.after_request
+def _finalize_request(response: Any) -> Any:
+    try:
+        identity = get_request_identity()
+        if identity and identity != "anonymous":
+            response = issue_security_cookies(response, identity)
+    except Exception:
+        pass
+
+    try:
+        if str(request.path).startswith("/api/"):
+            identity = get_request_identity()
+            metadata = {
+                "method": request.method,
+                "path": request.path,
+                "request_id": REQUEST_ID.get("-"),
+            }
+            db.save_audit_event(
+                identity=identity,
+                action=f"{request.method} {request.path}",
+                target=str(request.path),
+                status_code=int(getattr(response, "status_code", 0) or 0),
+                metadata=metadata,
+            )
+    except Exception as audit_error:
+        LOGGER.debug("Audit write skipped: %s", audit_error)
+    return response
 
 
 def _run_with_timeout(
@@ -389,7 +436,7 @@ def health_live() -> Any:
 @app.get("/health/ready")
 def health_ready() -> Any:
     db.init_db()
-    return jsonify({"status": "ready", "db": str(db.DB_PATH)})
+    return jsonify({"status": "ready", "db": str(db.DB_PATH), "schema_version": db.get_schema_version()})
 
 
 @app.get("/api/languages")
@@ -452,6 +499,35 @@ def create_history_snapshot_job() -> Any:
         return jsonify({"job_id": job_id, "status": "queued"}), 202
     except ApiError as exc:
         return from_api_error(exc)
+
+
+@app.get("/api/v1/auth/security")
+@require_auth
+def get_auth_security_tokens() -> Any:
+    identity = get_request_identity()
+    payload = {"identity": identity, "tokens": build_security_tokens(identity)}
+    response = jsonify(payload)
+    return issue_security_cookies(response, identity)
+
+
+@app.post("/api/v1/admin/cleanup")
+@require_auth
+def run_cleanup() -> Any:
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        raise ApiError("invalid_request_body", "Request body must be a JSON object.", 400)
+    try:
+        scan_ttl_days = int(payload.get("scan_ttl_days", SCAN_TTL_DAYS))
+        job_ttl_days = int(payload.get("job_ttl_days", JOB_TTL_DAYS))
+        audit_ttl_days = int(payload.get("audit_ttl_days", AUDIT_TTL_DAYS))
+    except (TypeError, ValueError) as exc:
+        raise ApiError("invalid_cleanup_ttl", "TTL values must be integers.", 400) from exc
+    summary = db.cleanup_expired_artifacts(
+        scan_ttl_days=max(1, scan_ttl_days),
+        job_ttl_days=max(1, job_ttl_days),
+        audit_ttl_days=max(1, audit_ttl_days),
+    )
+    return jsonify({"ok": True, "cleanup": summary})
 
 
 @app.get("/api/v1/jobs/<job_id>")
