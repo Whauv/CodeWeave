@@ -41,6 +41,9 @@ let activeActionPlan = null;
 let lastDetailNodeSnapshot = null;
 const DEFAULT_CHAT_PROVIDER = "groq";
 const CHAT_STORAGE_KEY = "codeweave-chat-sessions-v1";
+const PRODUCT_COLLAB_STATE_KEY = "codeweave-collab-state-v1";
+let workspaceList = [];
+let activeInvestigationSessionId = null;
 
 async function fetchJsonWithFallback(urls, options = {}) {
   let lastError = "Request failed";
@@ -65,6 +68,58 @@ async function fetchJsonWithFallback(urls, options = {}) {
     }
   }
   throw new Error(lastError);
+}
+
+function setTopStatus(message) {
+  const status = document.getElementById("status-label");
+  if (status && message) {
+    status.textContent = message;
+  }
+}
+
+function getWorkspaceSelectValue() {
+  const select = document.getElementById("workspace-select");
+  const raw = select?.value ? String(select.value).trim() : "";
+  return raw ? Number(raw) : null;
+}
+
+function getSelectedNodeIdForShare() {
+  return (
+    window.getSelectedGraphNodeId?.() ||
+    window.__CODEWEAVE_ACTIVE_DETAIL_NODE_ID__ ||
+    window.__CODEWEAVE_SELECTED_NODE_ID__ ||
+    null
+  );
+}
+
+function getCurrentGraphStateSnapshot() {
+  const selectedNodeId = getSelectedNodeIdForShare();
+  const searchQuery = document.getElementById("search-input")?.value?.trim() || "";
+  const state = {
+    scan_target: String(window.__CODEWEAVE_SCAN_TARGET__ || "").trim(),
+    selected_node_id: selectedNodeId,
+    search_query: searchQuery,
+    theme: document.body?.dataset?.theme || "dark",
+    focused_node_name: document.getElementById("node-name")?.textContent?.trim() || "",
+  };
+  return state;
+}
+
+function loadCollabState() {
+  try {
+    const raw = window.localStorage.getItem(PRODUCT_COLLAB_STATE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    activeInvestigationSessionId = parsed.activeInvestigationSessionId || null;
+  } catch (_error) {
+    activeInvestigationSessionId = null;
+  }
+}
+
+function persistCollabState() {
+  window.localStorage.setItem(
+    PRODUCT_COLLAB_STATE_KEY,
+    JSON.stringify({ activeInvestigationSessionId })
+  );
 }
 
 function makeSessionId() {
@@ -589,6 +644,319 @@ function exportActionPlanMarkdown() {
   window.URL.revokeObjectURL(url);
 }
 
+function parseShareToken(inputValue) {
+  const raw = String(inputValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (!raw.includes("://")) {
+    return raw;
+  }
+  try {
+    const url = new URL(raw);
+    const queryToken = url.searchParams.get("share");
+    if (queryToken) {
+      return queryToken;
+    }
+    const parts = url.pathname.split("/").filter(Boolean);
+    return parts.at(-1) || "";
+  } catch (_error) {
+    return raw;
+  }
+}
+
+async function refreshWorkspaceOptions() {
+  const select = document.getElementById("workspace-select");
+  if (!select) {
+    return;
+  }
+  try {
+    const { payload } = await fetchJsonWithFallback(["/api/v1/workspaces"]);
+    workspaceList = Array.isArray(payload.workspaces) ? payload.workspaces : [];
+    const currentValue = String(select.value || "").trim();
+    select.innerHTML = `<option value="">Personal</option>`;
+    workspaceList.forEach((workspace) => {
+      const option = document.createElement("option");
+      option.value = String(workspace.id);
+      option.textContent = `${workspace.name} (${workspace.member_count || 1})`;
+      select.appendChild(option);
+    });
+    if (currentValue && workspaceList.some((workspace) => String(workspace.id) === currentValue)) {
+      select.value = currentValue;
+    }
+  } catch (error) {
+    console.error(error);
+    setTopStatus(`Could not load workspaces: ${error.message}`);
+  }
+}
+
+async function createWorkspaceFromInput() {
+  const input = document.getElementById("workspace-name-input");
+  const name = input?.value?.trim() || "";
+  if (!name) {
+    setTopStatus("Enter a workspace name first.");
+    return;
+  }
+  try {
+    await fetchJsonWithFallback(["/api/v1/workspaces"], {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (input) {
+      input.value = "";
+    }
+    await refreshWorkspaceOptions();
+    setTopStatus(`Workspace ready: ${name}`);
+  } catch (error) {
+    setTopStatus(`Workspace create failed: ${error.message}`);
+  }
+}
+
+async function createShareLink() {
+  const output = document.getElementById("share-link-output");
+  const payload = {
+    payload: getCurrentGraphStateSnapshot(),
+  };
+  const workspaceId = getWorkspaceSelectValue();
+  if (workspaceId) {
+    payload.workspace_id = workspaceId;
+  }
+  try {
+    const { payload: result } = await fetchJsonWithFallback(["/api/v1/share-links"], {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const shareLink = result.share_link || {};
+    const shareUrl = String(shareLink.url || "");
+    if (output) {
+      output.innerHTML = shareUrl
+        ? `<a href="${shareUrl}" target="_blank" rel="noreferrer">${shareUrl}</a>`
+        : `Token: ${shareLink.token || "unknown"}`;
+    }
+    if (shareUrl && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(shareUrl).catch(() => {});
+    }
+    setTopStatus("Share link created and copied.");
+  } catch (error) {
+    if (output) {
+      output.textContent = `Could not create share link: ${error.message}`;
+    }
+    setTopStatus(`Share link failed: ${error.message}`);
+  }
+}
+
+async function applySharedStatePayload(sharedState) {
+  if (!sharedState || typeof sharedState !== "object") {
+    return;
+  }
+  const target = String(sharedState.scan_target || "").trim();
+  if (target && typeof window.loadCachedScanTarget === "function") {
+    await window.loadCachedScanTarget(target, { silent: true });
+  }
+  const theme = String(sharedState.theme || "").toLowerCase();
+  if (theme === "light" || theme === "dark") {
+    document.body.dataset.theme = theme;
+  }
+  const searchValue = String(sharedState.search_query || "").trim();
+  const searchInput = document.getElementById("search-input");
+  if (searchInput) {
+    searchInput.value = searchValue;
+  }
+  if (searchValue && typeof window.searchNodes === "function") {
+    window.searchNodes(searchValue);
+  }
+  const selectedNodeId = String(sharedState.selected_node_id || "").trim();
+  if (selectedNodeId && typeof window.highlightNode === "function") {
+    window.highlightNode(selectedNodeId);
+    const graphData = window.__CODEMAPPER_GRAPH__;
+    const node = graphData?.nodes?.find((item) => item.id === selectedNodeId);
+    if (node && typeof window.loadNodeDetail === "function") {
+      await window.loadNodeDetail(node, graphData);
+    }
+  }
+}
+
+async function loadShareLinkFromInput() {
+  const input = document.getElementById("share-link-token-input");
+  const token = parseShareToken(input?.value);
+  if (!token) {
+    setTopStatus("Paste a share token or URL first.");
+    return;
+  }
+  try {
+    const { payload } = await fetchJsonWithFallback([`/api/v1/share-links/${encodeURIComponent(token)}`]);
+    const sharedState = payload?.share_link?.payload || {};
+    await applySharedStatePayload(sharedState);
+    setTopStatus("Shared investigation loaded.");
+  } catch (error) {
+    setTopStatus(`Could not load share link: ${error.message}`);
+  }
+}
+
+function renderInvestigationSessionList(sessions) {
+  const list = document.getElementById("investigation-session-list");
+  if (!list) {
+    return;
+  }
+  const rows = Array.isArray(sessions) ? sessions : [];
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.textContent = "No saved sessions yet.";
+    return;
+  }
+  rows.forEach((session) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "list-item";
+    wrapper.style.marginBottom = "6px";
+    const button = document.createElement("button");
+    button.className = "linked-item";
+    const timestamp = String(session.updated_at || "").replace("T", " ").replace("Z", "");
+    button.innerHTML = `<span>${session.title || "Untitled investigation"}</span><span class="linked-meta">${timestamp || "saved"}</span>`;
+    button.addEventListener("click", async () => {
+      await loadInvestigationSession(session.id);
+    });
+    wrapper.appendChild(button);
+    list.appendChild(wrapper);
+  });
+}
+
+async function refreshInvestigationSessions() {
+  try {
+    const workspaceId = getWorkspaceSelectValue();
+    const suffix = workspaceId ? `?workspace_id=${workspaceId}` : "";
+    const { payload } = await fetchJsonWithFallback([`/api/v1/investigations${suffix}`]);
+    renderInvestigationSessionList(payload.sessions || []);
+  } catch (error) {
+    const list = document.getElementById("investigation-session-list");
+    if (list) {
+      list.textContent = `Could not load sessions: ${error.message}`;
+    }
+  }
+}
+
+async function saveInvestigationSession() {
+  const titleInput = document.getElementById("investigation-title-input");
+  const title = titleInput?.value?.trim() || "";
+  if (!title) {
+    setTopStatus("Enter an investigation title first.");
+    return;
+  }
+  const payload = {
+    title,
+    state: getCurrentGraphStateSnapshot(),
+    workspace_id: getWorkspaceSelectValue(),
+  };
+  try {
+    const { payload: responsePayload } = await fetchJsonWithFallback(["/api/v1/investigations"], {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    activeInvestigationSessionId = responsePayload?.session?.id || null;
+    persistCollabState();
+    await refreshInvestigationSessions();
+    setTopStatus(`Saved investigation: ${title}`);
+  } catch (error) {
+    setTopStatus(`Could not save investigation: ${error.message}`);
+  }
+}
+
+async function loadInvestigationSession(sessionId) {
+  try {
+    const { payload } = await fetchJsonWithFallback([`/api/v1/investigations/${sessionId}`]);
+    const session = payload.session || {};
+    activeInvestigationSessionId = session.id || null;
+    persistCollabState();
+    const titleInput = document.getElementById("investigation-title-input");
+    if (titleInput) {
+      titleInput.value = session.title || "";
+    }
+    await applySharedStatePayload(session.state || {});
+    setTopStatus(`Loaded investigation: ${session.title || session.id}`);
+  } catch (error) {
+    setTopStatus(`Could not load investigation: ${error.message}`);
+  }
+}
+
+async function analyzePullRequest() {
+  const input = document.getElementById("pr-url-input");
+  const resultContainer = document.getElementById("pr-analysis-results");
+  const prUrl = input?.value?.trim() || "";
+  if (!prUrl) {
+    setTopStatus("Paste a PR URL first.");
+    return;
+  }
+  if (resultContainer) {
+    resultContainer.textContent = "Analyzing PR...";
+  }
+  try {
+    const { payload } = await fetchJsonWithFallback(["/api/v1/pr/analyze"], {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pr_url: prUrl }),
+    });
+    const impactedNodes = Array.isArray(payload.impacted_nodes) ? payload.impacted_nodes : [];
+    if (!resultContainer) {
+      return;
+    }
+    resultContainer.innerHTML = "";
+    if (!impactedNodes.length) {
+      resultContainer.textContent = "No impacted nodes matched current graph.";
+      return;
+    }
+    const summary = document.createElement("div");
+    summary.className = "muted";
+    summary.textContent = `Matched ${impactedNodes.length} impacted node(s) across ${payload.changed_file_count || 0} changed file(s).`;
+    resultContainer.appendChild(summary);
+    impactedNodes.slice(0, 25).forEach((node) => {
+      const button = document.createElement("button");
+      button.className = "linked-item";
+      button.innerHTML = `<span>${node.name || node.id}</span><span class="linked-meta">${node.file || node.status || "changed"}</span>`;
+      button.addEventListener("click", () => {
+        if (window.highlightNode) {
+          window.highlightNode(node.id);
+        }
+        const graphData = window.__CODEMAPPER_GRAPH__;
+        const selected = graphData?.nodes?.find((item) => item.id === node.id);
+        if (selected && window.loadNodeDetail) {
+          window.loadNodeDetail(selected, graphData);
+        }
+      });
+      resultContainer.appendChild(button);
+    });
+    setTopStatus(`PR analysis ready: ${impactedNodes.length} impacted nodes.`);
+  } catch (error) {
+    if (resultContainer) {
+      resultContainer.textContent = `PR analysis failed: ${error.message}`;
+    }
+    setTopStatus(`PR analysis failed: ${error.message}`);
+  }
+}
+
+async function maybeLoadShareFromUrl() {
+  const shareToken = new URLSearchParams(window.location.search).get("share");
+  if (!shareToken) {
+    return;
+  }
+  const tokenInput = document.getElementById("share-link-token-input");
+  if (tokenInput) {
+    tokenInput.value = shareToken;
+  }
+  await loadShareLinkFromInput();
+}
+
+function bindCollaborationActions() {
+  document.getElementById("workspace-refresh-btn")?.addEventListener("click", refreshWorkspaceOptions);
+  document.getElementById("workspace-create-btn")?.addEventListener("click", createWorkspaceFromInput);
+  document.getElementById("share-link-create-btn")?.addEventListener("click", createShareLink);
+  document.getElementById("share-link-load-btn")?.addEventListener("click", loadShareLinkFromInput);
+  document.getElementById("investigation-save-btn")?.addEventListener("click", saveInvestigationSession);
+  document.getElementById("investigation-refresh-btn")?.addEventListener("click", refreshInvestigationSessions);
+  document.getElementById("pr-analyze-btn")?.addEventListener("click", analyzePullRequest);
+}
+
 function makeLinkedNodeItem(node, graphData) {
   const button = document.createElement("button");
   button.className = "linked-item";
@@ -860,6 +1228,11 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("panel-close-btn")?.addEventListener("click", hidePanel);
   bindDetailPanelActions();
   initializeChatUi();
+  loadCollabState();
+  bindCollaborationActions();
+  refreshWorkspaceOptions();
+  refreshInvestigationSessions();
+  maybeLoadShareFromUrl();
   renderProjectInsights(window.__CODEWEAVE_INSIGHTS__ || null);
 });
 

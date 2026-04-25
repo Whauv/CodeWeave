@@ -109,6 +109,73 @@ class AppRouteTests(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload.get("error_code"), "invalid_commit_hash")
 
+    def test_workspace_share_and_investigation_endpoints(self) -> None:
+        create_workspace = self.client.post("/api/v1/workspaces", json={"name": "Wave5 Team"})
+        self.assertEqual(create_workspace.status_code, 201)
+        workspace = create_workspace.get_json()["workspace"]
+        workspace_id = workspace["id"]
+
+        workspaces = self.client.get("/api/v1/workspaces")
+        self.assertEqual(workspaces.status_code, 200)
+        self.assertGreaterEqual(len(workspaces.get_json().get("workspaces", [])), 1)
+
+        share = self.client.post(
+            "/api/v1/share-links",
+            json={
+                "workspace_id": workspace_id,
+                "payload": {"scan_target": "C:/demo", "selected_node_id": "abc123"},
+                "expires_hours": 24,
+            },
+        )
+        self.assertEqual(share.status_code, 201)
+        token = share.get_json()["share_link"]["token"]
+
+        resolved = self.client.get(f"/api/v1/share-links/{token}")
+        self.assertEqual(resolved.status_code, 200)
+        self.assertEqual(resolved.get_json()["share_link"]["payload"]["selected_node_id"], "abc123")
+
+        session_create = self.client.post(
+            "/api/v1/investigations",
+            json={"title": "Dependency risk drill", "workspace_id": workspace_id, "state": {"scan_target": "C:/demo"}},
+        )
+        self.assertEqual(session_create.status_code, 201)
+        session_id = session_create.get_json()["session"]["id"]
+
+        session_get = self.client.get(f"/api/v1/investigations/{session_id}")
+        self.assertEqual(session_get.status_code, 200)
+        session_patch = self.client.patch(
+            f"/api/v1/investigations/{session_id}",
+            json={"title": "Dependency risk drill (updated)", "state": {"scan_target": "C:/demo2"}},
+        )
+        self.assertEqual(session_patch.status_code, 200)
+        session_list = self.client.get("/api/v1/investigations")
+        self.assertEqual(session_list.status_code, 200)
+        self.assertGreaterEqual(len(session_list.get_json().get("sessions", [])), 1)
+
+    def test_pr_analyze_endpoint_contract(self) -> None:
+        fake_graph = {
+            "nodes": [
+                {"id": "n1", "name": "handler", "file": "server/app.py", "churn_count": 8, "mutation_status": "hotspot"}
+            ],
+            "edges": [],
+        }
+        with patch(
+            "server.app._load_latest_scan",
+            return_value=(fake_graph, {"scan_root": str("."), "source_kind": "local", "language": "python"}),
+        ), patch("server.app.is_git_repo", return_value=True), patch(
+            "server.app._guess_changed_files_for_pr",
+            return_value=([{"status": "M", "path": "server/app.py"}], {"source": "test", "base_commit": "a", "head_commit": "b"}),
+        ):
+            response = self.client.post(
+                "/api/v1/pr/analyze",
+                json={"pr_url": "https://github.com/acme/project/pull/42"},
+            )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertIn("impacted_nodes", payload)
+        self.assertIn("hotspots", payload)
+        self.assertIn("changed_files", payload)
+
 
 if __name__ == "__main__":
     unittest.main()
