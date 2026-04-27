@@ -337,8 +337,57 @@ def _perform_scan(identity: str, path_value: str, language: str) -> dict[str, An
     return graph_data
 
 
-def _perform_history_snapshot(identity: str, commit_hash: str) -> dict[str, Any]:
-    graph_data, scan_context = _load_latest_scan(identity)
+def _resolve_history_scan_context(
+    identity: str,
+    *,
+    target_override: str = "",
+    language_override: str = "",
+) -> dict[str, Any] | None:
+    _graph_data, scan_context = _load_latest_scan(identity)
+    target_value = str(target_override or "").strip()
+    language_value = str(language_override or "").strip().lower()
+
+    if not target_value:
+        return scan_context
+
+    if isinstance(scan_context, dict) and str(scan_context.get("target") or "").strip() == target_value:
+        if language_value:
+            scan_context = {**scan_context, "language": language_value}
+        return scan_context
+
+    scan_root, normalized_target, source_kind = resolve_scan_source(
+        target_value,
+        include_all_branches=True,
+        allowed_local_roots=ALLOWED_LOCAL_ROOTS,
+        allowed_github_hosts=ALLOWED_GITHUB_HOSTS,
+    )
+    resolved_language = language_value or str(scan_context.get("language") if isinstance(scan_context, dict) else "python")
+    if not resolved_language:
+        resolved_language = "python"
+    revision = get_head_commit_hash(scan_root) if is_git_repo(scan_root) else ""
+    return {
+        "project_input": target_value,
+        "target": normalized_target,
+        "scan_root": str(scan_root),
+        "language": resolved_language,
+        "is_git_repo": is_git_repo(scan_root),
+        "source_kind": source_kind,
+        "scan_revision": revision,
+    }
+
+
+def _perform_history_snapshot(
+    identity: str,
+    commit_hash: str,
+    *,
+    target_override: str = "",
+    language_override: str = "",
+) -> dict[str, Any]:
+    scan_context = _resolve_history_scan_context(
+        identity,
+        target_override=target_override,
+        language_override=language_override,
+    )
     if scan_context is None:
         raise ApiError("graph_not_scanned", "No graph scanned yet", 404)
 
@@ -346,6 +395,8 @@ def _perform_history_snapshot(identity: str, commit_hash: str) -> dict[str, Any]
     try:
         validated_commit_hash = validate_commit_hash(commit_hash)
         repo_root = Path(str(scan_context.get("scan_root") or "")).resolve()
+        if not is_git_repo(repo_root):
+            raise ApiError("history_requires_git_repo", "Time-travel history requires a git repository.", 400)
         language = str(scan_context.get("language") or "python")
         cached_history = load_history_snapshot(repo_root=repo_root, commit_hash=validated_commit_hash, language=language)
         if isinstance(cached_history, dict):
@@ -384,7 +435,14 @@ def _scan_job_handler(identity: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 def _history_snapshot_job_handler(identity: str, payload: dict[str, Any]) -> dict[str, Any]:
     commit_hash = str(payload.get("commit_hash") or "").strip()
-    return _perform_history_snapshot(identity, commit_hash)
+    target_override = str(payload.get("target") or "").strip()
+    language_override = str(payload.get("language") or "").strip().lower()
+    return _perform_history_snapshot(
+        identity,
+        commit_hash,
+        target_override=target_override,
+        language_override=language_override,
+    )
 
 
 def _scan_endpoint_impl() -> Any:
@@ -414,7 +472,13 @@ def _chat_endpoint_impl() -> Any:
 
 def _history_commits_impl() -> Any:
     identity = get_request_identity()
-    _graph_data, scan_context = _load_latest_scan(identity)
+    target_override = str(request.args.get("target") or "").strip()
+    language_override = str(request.args.get("language") or "").strip().lower()
+    scan_context = _resolve_history_scan_context(
+        identity,
+        target_override=target_override,
+        language_override=language_override,
+    )
     if scan_context is None:
         return error_response("graph_not_scanned", "No graph scanned yet", 404)
 
@@ -439,13 +503,22 @@ def _history_commits_impl() -> Any:
 
 def _history_snapshot_impl(commit_hash: str) -> Any:
     identity = get_request_identity()
-    history_graph = _perform_history_snapshot(identity, commit_hash)
+    history_graph = _perform_history_snapshot(
+        identity,
+        commit_hash,
+        target_override=str(request.args.get("target") or "").strip(),
+        language_override=str(request.args.get("language") or "").strip().lower(),
+    )
     return jsonify(history_graph)
 
 
 def _history_diff_impl(from_commit: str, to_commit: str) -> Any:
     identity = get_request_identity()
-    _graph_data, scan_context = _load_latest_scan(identity)
+    scan_context = _resolve_history_scan_context(
+        identity,
+        target_override=str(request.args.get("target") or "").strip(),
+        language_override=str(request.args.get("language") or "").strip().lower(),
+    )
     if scan_context is None:
         return error_response("graph_not_scanned", "No graph scanned yet", 404)
 
@@ -655,10 +728,16 @@ def create_history_snapshot_job() -> Any:
         if not isinstance(payload, dict):
             raise ApiError("invalid_request_body", "Request body must be a JSON object.", 400)
         commit_hash = validate_commit_hash(str(payload.get("commit_hash") or ""))
+        target_override = str(payload.get("target") or "").strip()
+        language_override = str(payload.get("language") or "").strip().lower()
         job_id = JOBS.submit(
             identity=get_request_identity(),
             job_type="history_snapshot",
-            payload={"commit_hash": commit_hash},
+            payload={
+                "commit_hash": commit_hash,
+                "target": target_override,
+                "language": language_override,
+            },
             handler=_history_snapshot_job_handler,
         )
         return jsonify({"job_id": job_id, "status": "queued"}), 202
