@@ -5,6 +5,8 @@ from typing import Any
 
 import networkx as nx
 
+DEFAULT_MAX_DEPTH = 2
+
 
 def _color_for_depth(depth: int) -> str:
     if depth <= 1:
@@ -14,6 +16,23 @@ def _color_for_depth(depth: int) -> str:
     if depth == 3:
         return "#d8b4fe"
     return "#e9d5ff"
+
+
+def _bfs_depths(graph: nx.DiGraph, start_id: str, max_depth: int) -> dict[str, int]:
+    depth_map: dict[str, int] = {start_id: 0}
+    queue: list[tuple[str, int]] = [(start_id, 0)]
+    while queue:
+        node_id, depth = queue.pop(0)
+        if depth >= max_depth:
+            continue
+        for neighbor_id in graph.successors(node_id):
+            next_depth = depth + 1
+            previous_depth = depth_map.get(neighbor_id)
+            if previous_depth is not None and previous_depth <= next_depth:
+                continue
+            depth_map[neighbor_id] = next_depth
+            queue.append((neighbor_id, next_depth))
+    return depth_map
 
 
 def compute_blast_radius(graph_data: dict[str, Any], node_id: str) -> dict[str, Any]:
@@ -39,16 +58,27 @@ def compute_blast_radius(graph_data: dict[str, Any], node_id: str) -> dict[str, 
         }
 
     reversed_graph = graph.reverse(copy=True)
-    layers = list(nx.bfs_layers(reversed_graph, [node_id]))
-    depth_map: dict[str, int] = {}
-    affected_nodes: list[str] = []
-    risk_colors: dict[str, str] = {}
+    upstream_depths = _bfs_depths(reversed_graph, node_id, DEFAULT_MAX_DEPTH)
+    downstream_depths = _bfs_depths(graph, node_id, DEFAULT_MAX_DEPTH)
 
-    for depth, layer in enumerate(layers):
-        for affected_node_id in layer:
-            depth_map[affected_node_id] = depth
-            affected_nodes.append(affected_node_id)
-            risk_colors[affected_node_id] = _color_for_depth(depth)
+    combined_depths: dict[str, int] = {}
+    for candidate_id, depth in upstream_depths.items():
+        combined_depths[candidate_id] = depth
+    for candidate_id, depth in downstream_depths.items():
+        previous_depth = combined_depths.get(candidate_id)
+        if previous_depth is None or depth < previous_depth:
+            combined_depths[candidate_id] = depth
+
+    affected_nodes = sorted(
+        combined_depths.keys(),
+        key=lambda candidate_id: (
+            combined_depths[candidate_id],
+            str(graph.nodes[candidate_id].get("name") or candidate_id).lower(),
+            candidate_id,
+        ),
+    )
+    depth_map = {candidate_id: combined_depths[candidate_id] for candidate_id in affected_nodes}
+    risk_colors = {candidate_id: _color_for_depth(depth_map[candidate_id]) for candidate_id in affected_nodes}
 
     affected_modules = {
         graph.nodes[affected_node_id].get("file", "")
@@ -57,6 +87,8 @@ def compute_blast_radius(graph_data: dict[str, Any], node_id: str) -> dict[str, 
     }
     epicenter_name = graph.nodes[node_id].get("name", node_id)
     impacted_count = max(len(affected_nodes) - 1, 0)
+    upstream_count = max(len(upstream_depths) - 1, 0)
+    downstream_count = max(len(downstream_depths) - 1, 0)
 
     return {
         "epicenter": node_id,
@@ -64,8 +96,12 @@ def compute_blast_radius(graph_data: dict[str, Any], node_id: str) -> dict[str, 
         "affected_nodes": affected_nodes,
         "depth_map": depth_map,
         "risk_colors": risk_colors,
+        "upstream_affected_count": upstream_count,
+        "downstream_affected_count": downstream_count,
+        "max_depth": DEFAULT_MAX_DEPTH,
         "summary": (
-            f"Changing {epicenter_name} affects {impacted_count} functions "
+            f"Deleting {epicenter_name} impacts {impacted_count} nodes "
+            f"(upstream: {upstream_count}, downstream: {downstream_count}) "
             f"across {len(affected_modules)} modules"
         ),
     }

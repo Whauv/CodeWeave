@@ -30,7 +30,44 @@ function getSelectedGraphNode() {
 }
 
 function resolveActionPlanNode() {
-  return getActiveDetailNode() || getSelectedGraphNode() || lastDetailNodeSnapshot;
+  const candidate = getActiveDetailNode() || getSelectedGraphNode() || lastDetailNodeSnapshot;
+  return resolveConcreteNode(candidate) || candidate;
+}
+
+function resolveConcreteNode(node) {
+  if (!node || !node.isCluster) {
+    return node || null;
+  }
+  const graphData = window.__CODEMAPPER_GRAPH__;
+  if (!graphData || !Array.isArray(graphData.nodes)) {
+    return null;
+  }
+  const memberIds = Array.isArray(node.memberIds) ? node.memberIds : [];
+  for (const memberId of memberIds) {
+    const memberNode = getNodeById(memberId, graphData);
+    if (memberNode && !memberNode.isCluster) {
+      return memberNode;
+    }
+  }
+  const clusterHint = String(node.file || "").trim();
+  if (clusterHint) {
+    const normalizedHint = clusterHint.replace(/\\/g, "/").toLowerCase();
+    const byFile = graphData.nodes.find((candidate) => {
+      const file = String(candidate?.file || "").replace(/\\/g, "/").toLowerCase();
+      if (!file) {
+        return false;
+      }
+      return file === normalizedHint || file.startsWith(`${normalizedHint}/`);
+    });
+    if (byFile) {
+      return byFile;
+    }
+  }
+  const byName = graphData.nodes.find((candidate) => String(candidate?.name || "") === String(node.name || ""));
+  if (byName) {
+    return byName;
+  }
+  return graphData.nodes.find((candidate) => !candidate?.isCluster) || null;
 }
 
 let activeChatNodeId = null;
@@ -225,6 +262,12 @@ async function activateChatSession(sessionId) {
   const session = getActiveChatSession();
   if (session) {
     activeChatNodeId = session.nodeId || null;
+    if (typeof window.clearGraphTransientFocus === "function") {
+      window.clearGraphTransientFocus();
+    }
+    if (typeof window.restoreGraphVisualState === "function") {
+      window.restoreGraphVisualState();
+    }
     if (session.scanTarget && typeof window.loadCachedScanTarget === "function") {
       await window.loadCachedScanTarget(session.scanTarget, { silent: true });
     }
@@ -232,12 +275,18 @@ async function activateChatSession(sessionId) {
     if (session.nodeId && graphData) {
       const node = getNodeById(session.nodeId, graphData);
       if (node) {
-        if (window.highlightNode) {
-          window.highlightNode(node.id);
+        if (typeof window.panToNode === "function") {
+          window.panToNode(node.id);
         }
         document.getElementById("detail-panel")?.classList.remove("hidden");
         document.getElementById("detail-shell")?.classList.remove("hidden");
-        loadNodeDetail(node, graphData);
+        await loadNodeDetail(node, graphData, { skipGraphSelection: true });
+        if (typeof window.clearGraphTransientFocus === "function") {
+          window.clearGraphTransientFocus();
+        }
+        if (typeof window.restoreGraphVisualState === "function") {
+          window.restoreGraphVisualState();
+        }
       }
     }
   }
@@ -530,12 +579,12 @@ async function ensureServerGraphCache() {
 }
 
 async function generateActionPlan() {
-  const node = resolveActionPlanNode();
+  const node = resolveConcreteNode(resolveActionPlanNode());
   if (!node) {
     renderActionPlan(null);
     const container = document.getElementById("action-plan-content");
     if (container) {
-      container.innerHTML = `<div class="muted">Select a concrete node first, then click Generate Plan.</div>`;
+      container.innerHTML = `<div class="muted">Select a concrete function/class node first, then click Generate Plan.</div>`;
     }
     return;
   }
@@ -547,6 +596,7 @@ async function generateActionPlan() {
 
   try {
     const candidateUrls = [
+      `/api/v1/action-plan/${node.id}`,
       `/api/action-plan/${node.id}`,
       `/api/action/plan/${node.id}`,
       `/api/action_plan/${node.id}`,
@@ -915,13 +965,16 @@ async function analyzePullRequest() {
       button.className = "linked-item";
       button.innerHTML = `<span>${node.name || node.id}</span><span class="linked-meta">${node.file || node.status || "changed"}</span>`;
       button.addEventListener("click", () => {
-        if (window.highlightNode) {
-          window.highlightNode(node.id);
+        if (typeof window.clearGraphTransientFocus === "function") {
+          window.clearGraphTransientFocus();
+        }
+        if (typeof window.panToNode === "function") {
+          window.panToNode(node.id);
         }
         const graphData = window.__CODEMAPPER_GRAPH__;
         const selected = graphData?.nodes?.find((item) => item.id === node.id);
         if (selected && window.loadNodeDetail) {
-          window.loadNodeDetail(selected, graphData);
+          window.loadNodeDetail(selected, graphData, { skipGraphSelection: true });
         }
       });
       resultContainer.appendChild(button);
@@ -962,10 +1015,13 @@ function makeLinkedNodeItem(node, graphData) {
   button.className = "linked-item";
   button.innerHTML = `<span>${node.name}</span><span class="linked-meta">${node.type || "node"}</span>`;
   button.addEventListener("click", () => {
-    if (window.highlightNode) {
-      window.highlightNode(node.id);
+    if (typeof window.clearGraphTransientFocus === "function") {
+      window.clearGraphTransientFocus();
     }
-    loadNodeDetail(node, graphData);
+    if (typeof window.panToNode === "function") {
+      window.panToNode(node.id);
+    }
+    loadNodeDetail(node, graphData, { skipGraphSelection: true });
   });
   return button;
 }
@@ -1047,12 +1103,13 @@ function setDetailActionButtonsEnabled(enabled) {
   }
 }
 
-async function loadNodeDetail(node, graphData) {
+async function loadNodeDetail(node, graphData, options = {}) {
   if (!node) {
     return;
   }
   try {
-    if (window.highlightNode) {
+    const skipGraphSelection = Boolean(options.skipGraphSelection);
+    if (!skipGraphSelection && window.highlightNode) {
       window.highlightNode(node.id);
     }
     ensureDetailPanelVisible();
@@ -1199,14 +1256,15 @@ function hidePanel() {
 
 function bindDetailPanelActions() {
   document.getElementById("simulate-blast-btn")?.addEventListener("click", () => {
-    const node = resolveActionPlanNode();
+    const rawNode = resolveActionPlanNode();
+    const node = resolveConcreteNode(rawNode);
     if (node && window.triggerBlastRadius) {
       window.triggerBlastRadius(node);
       return;
     }
     const blastInfo = document.getElementById("blast-info");
     if (blastInfo) {
-      blastInfo.innerHTML = `<div class="muted">Select a node first, then click Simulate Blast Radius.</div>`;
+      blastInfo.innerHTML = `<div class="muted">Select an actual function/class node first (not a collapsed cluster), then click Simulate Blast Radius.</div>`;
     }
   });
   document.getElementById("clear-blast-btn")?.addEventListener("click", () => {
@@ -1215,7 +1273,7 @@ function bindDetailPanelActions() {
     }
   });
   document.getElementById("view-source-btn")?.addEventListener("click", () => {
-    const node = getActiveDetailNode();
+    const node = resolveConcreteNode(getActiveDetailNode());
     if (node && window.openMonacoModal) {
       window.openMonacoModal(node.source_code || "# No source code available");
     }

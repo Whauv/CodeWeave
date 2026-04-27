@@ -951,6 +951,12 @@ def get_action_plan(node_id: str) -> Any:
         return jsonify({"error": str(exc)}), 400
 
 
+@app.get("/api/v1/action-plan/<node_id>")
+@require_auth
+def get_action_plan_v1(node_id: str) -> Any:
+    return get_action_plan(node_id)
+
+
 @app.get("/api/action/plan/<node_id>")
 def get_action_plan_legacy_slash(node_id: str) -> Any:
     return get_action_plan(node_id)

@@ -68,7 +68,6 @@
         state.collapsedClusterKeys.delete(clusterKey);
         changed = true;
       }
-      updateState({ currentFocusedClusterKey: clusterKey });
       return changed;
     }
 
@@ -103,6 +102,11 @@
         .style("cursor", "pointer")
         .on("click", (_, node) => handleNodePrimaryAction(node))
         .on("mouseenter", (event, node) => {
+          if (Number(globalScope.__CODEWEAVE_SUPPRESS_HOVER_TRACE_UNTIL__ || 0) > Date.now()) {
+            hideNodeTooltip();
+            restoreVisualState();
+            return;
+          }
           showNodeTooltip(node, event);
           deps.applyHoverTrace(node.id);
         })
@@ -136,12 +140,9 @@
       if (changed) {
         renderGraph(state.graphData);
       }
-      updateState({ selectedNodeId: nodeId });
+      updateState({ selectedNodeId: nodeId, currentFocusedClusterKey: null });
       globalScope.__CODEWEAVE_SELECTED_NODE_ID__ = nodeId || null;
       const selected = getSelectedNode();
-      if (selected) {
-        updateState({ currentFocusedClusterKey: deps.getClusterKey(selected) });
-      }
       setSelectedLabel(selected ? selected.name : "None");
       deps.renderBreadcrumbs();
       syncActionButtons();

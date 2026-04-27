@@ -860,7 +860,7 @@
 
     .graph-subbar {
       position: absolute;
-      top: 72px;
+      top: 122px;
       left: 16px;
       right: auto;
       max-width: calc(100% - 300px);
@@ -875,8 +875,12 @@
     .toolbar-group {
       display: flex;
       gap: 10px;
+      row-gap: 8px;
       flex-wrap: wrap;
       pointer-events: auto;
+      align-items: center;
+      align-content: flex-start;
+      min-width: 0;
       max-width: min(100%, calc(100% - 236px));
     }
 
@@ -1024,6 +1028,8 @@
     #graph-container {
       width: 100%;
       height: 100%;
+      box-sizing: border-box;
+      padding-top: 156px;
     }
 
     #graph-svg {
@@ -1635,6 +1641,14 @@
       .toolbar-group {
         max-width: 100%;
       }
+
+      .graph-subbar {
+        top: 136px;
+      }
+
+      #graph-container {
+        padding-top: 180px;
+      }
     }
 
     @media (max-width: 980px) {
@@ -1699,6 +1713,10 @@
       .graph-subbar {
         left: 12px;
         right: 12px;
+      }
+
+      #graph-container {
+        padding-top: 172px;
       }
 
       .toolbar-group,
@@ -1779,6 +1797,10 @@
         align-items: flex-start;
       }
 
+      #graph-container {
+        padding-top: 0;
+      }
+
       .status-row,
       .view-toggle-row,
       .panel-actions {
@@ -1848,8 +1870,6 @@
           <button id="view-split-btn" class="ghost-btn active">Split View</button>
           <button id="view-graph-btn" class="ghost-btn">Graph Focus</button>
           <button id="view-panel-btn" class="ghost-btn">Prompt Focus</button>
-          <button id="top-theme-light-btn" class="ghost-btn">Light Theme</button>
-          <button id="top-theme-dark-btn" class="ghost-btn active">Dark Theme</button>
         </div>
 
         <div class="scan-history-shell">
