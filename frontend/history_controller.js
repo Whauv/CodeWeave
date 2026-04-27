@@ -125,6 +125,21 @@
       }
     }
 
+    function buildHistoryQueryString() {
+      const state = getState();
+      const target = String(state.currentScanTarget || globalScope.__CODEWEAVE_SCAN_TARGET__ || "").trim();
+      const language = String(state.currentLanguage || "").trim().toLowerCase();
+      const params = new URLSearchParams();
+      if (target) {
+        params.set("target", target);
+      }
+      if (language) {
+        params.set("language", language);
+      }
+      const query = params.toString();
+      return query ? `?${query}` : "";
+    }
+
     function normalizePathTail(pathValue) {
       const normalized = String(pathValue || "").replace(/\\/g, "/").toLowerCase().trim();
       const parts = normalized.split("/").filter(Boolean);
@@ -296,7 +311,11 @@
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ commit_hash: commit.hash }),
+                body: JSON.stringify({
+                  commit_hash: commit.hash,
+                  target: getState().currentScanTarget || globalScope.__CODEWEAVE_SCAN_TARGET__ || "",
+                  language: getState().currentLanguage || "",
+                }),
               }
             );
             const jobId = String(submitData.job_id || "").trim();
@@ -332,9 +351,10 @@
             }
           } catch (jobError) {
             try {
+              const historyQuery = buildHistoryQueryString();
               const fallback = await fetchJsonWithFallback([
-                `/api/v1/history/${commit.hash}`,
-                `/api/history/${commit.hash}`,
+                `/api/v1/history/${commit.hash}${historyQuery}`,
+                `/api/history/${commit.hash}${historyQuery}`,
               ]);
               data = fallback.data;
             } catch (_fallbackError) {
@@ -426,7 +446,8 @@
         });
         syncHistoryButtons();
 
-        const { data } = await fetchJsonWithFallback(["/api/v1/history", "/api/history"]);
+        const historyQuery = buildHistoryQueryString();
+        const { data } = await fetchJsonWithFallback([`/api/v1/history${historyQuery}`, `/api/history${historyQuery}`]);
 
         const commits = Array.isArray(data.commits) ? data.commits : [];
         setState({
@@ -614,10 +635,11 @@
           }
         };
 
+        const historyQuery = buildHistoryQueryString();
         const candidateUrls = [
-          `/api/v1/history-diff/${fromCommit.hash}/${toCommit.hash}`,
-          `/api/history-diff/${fromCommit.hash}/${toCommit.hash}`,
-          `/api/history/diff/${fromCommit.hash}/${toCommit.hash}`,
+          `/api/v1/history-diff/${fromCommit.hash}/${toCommit.hash}${historyQuery}`,
+          `/api/history-diff/${fromCommit.hash}/${toCommit.hash}${historyQuery}`,
+          `/api/history/diff/${fromCommit.hash}/${toCommit.hash}${historyQuery}`,
         ];
         let data = null;
         let requestError = null;

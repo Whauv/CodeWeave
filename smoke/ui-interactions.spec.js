@@ -47,6 +47,18 @@ async function scanFixture(page) {
   await openConcreteNodeDetail(page);
 }
 
+async function getGraphRenderStats(page) {
+  await page.waitForFunction(() => document.querySelectorAll("#graph-svg circle[data-node-id]").length > 0, null, {
+    timeout: 30000,
+  });
+  return await page.evaluate(() => {
+    const nodes = Array.from(document.querySelectorAll("#graph-svg circle[data-node-id]"));
+    const opacities = nodes.map((node) => Number(node.getAttribute("opacity") || "1"));
+    const faded = opacities.filter((value) => Number.isFinite(value) && value <= 0.2).length;
+    return { total: nodes.length, faded };
+  });
+}
+
 test.describe("CodeWeave interaction flows", () => {
   test("runs blast radius workflow", async ({ page }) => {
     await scanFixture(page);
@@ -113,5 +125,26 @@ test.describe("CodeWeave interaction flows", () => {
       "Changing this node will affect its direct callers and one downstream formatter.",
       { timeout: 30000 }
     );
+  });
+
+  test("clicking saved chat sessions pans without mutating graph selection", async ({ page }) => {
+    await scanFixture(page);
+    const concreteSelector = "#graph-svg circle[data-node-id]:not([data-node-id^='cluster::'])";
+    const concreteNodes = page.locator(concreteSelector);
+    if ((await concreteNodes.count()) > 1) {
+      await concreteNodes.nth(1).click({ force: true });
+      await expect(page.locator("#detail-panel")).toBeVisible({ timeout: 30000 });
+    }
+    await page.getByRole("button", { name: "New Chat" }).click();
+    await expect(page.locator("#chat-session-bar .chat-session-chip")).toHaveCount(2, { timeout: 30000 });
+    const selectedBefore = await page.evaluate(() => window.__CODEWEAVE_TEST_API__?.getSelectedNodeId?.() || null);
+    const before = await getGraphRenderStats(page);
+    await page.locator("#chat-session-bar .chat-session-chip").first().click();
+    await expect(page.locator("#detail-panel")).toBeVisible({ timeout: 30000 });
+    const after = await getGraphRenderStats(page);
+    const selectedAfter = await page.evaluate(() => window.__CODEWEAVE_TEST_API__?.getSelectedNodeId?.() || null);
+    expect(selectedAfter).toBe(selectedBefore);
+    expect(after.total).toBeGreaterThanOrEqual(Math.max(2, Math.floor(before.total * 0.8)));
+    expect(after.faded).toBeLessThan(Math.ceil(after.total * 0.75));
   });
 });

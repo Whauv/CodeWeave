@@ -128,25 +128,52 @@
       const palette = getGraphPalette();
       setState({ blastMode: true, currentBlastData: data });
       setMode("Blast");
+      applyBaseGraphStyle();
       const affected = new Set(data.affected_nodes || []);
+      const depthMap = data.depth_map || {};
       nodeSelection
         .classed("epicenter", (node) => node.id === data.epicenter)
-        .attr("fill", (node) => data.risk_colors?.[node.id] || getNodeFill(node))
-        .attr("opacity", (node) => (affected.has(node.id) ? 1 : 0.12))
+        .attr("fill", (node) => getNodeFill(node))
+        .attr("opacity", 1)
         .attr("stroke", (node) => {
           if (node.id === data.epicenter) {
             return "#f3e8ff";
           }
+          if (affected.has(node.id)) {
+            return "#a855f7";
+          }
           return node.id === getSelectedNodeId() ? palette.nodeSelected : palette.nodeStroke;
+        })
+        .attr("stroke-width", (node) => {
+          if (node.id === data.epicenter) {
+            return 5;
+          }
+          if (affected.has(node.id)) {
+            const depth = Number(depthMap[node.id] || 0);
+            if (depth <= 1) {
+              return 4;
+            }
+            if (depth <= 2) {
+              return 3;
+            }
+            return 2.5;
+          }
+          return node.id === getSelectedNodeId() ? 4 : 2;
         });
-      labelSelection.attr("opacity", (node) => (affected.has(node.id) ? 1 : 0.14));
+      labelSelection.attr("opacity", 1);
       linkSelection
-        .attr("opacity", (link) => (affected.has(link.source.id) && affected.has(link.target.id) ? 0.95 : 0.05))
+        .attr("opacity", (link) => {
+          const isAffectedLink = affected.has(link.source.id) && affected.has(link.target.id);
+          if (isAffectedLink) {
+            return 0.96;
+          }
+          return getLayoutMode() === "tree" ? 0.78 : 0.72;
+        })
         .attr("stroke", (link) => {
           if (affected.has(link.source.id) && affected.has(link.target.id)) {
             return "rgba(168, 85, 247, 0.72)";
           }
-          return getLayoutMode() === "tree" ? palette.linkTreeMuted : palette.linkForce;
+          return getLayoutMode() === "tree" ? palette.linkTree : palette.linkForce;
         });
       showBlastInfo(data);
     }
@@ -216,11 +243,6 @@
         applyBlastData(state.currentBlastData);
       } else if (state.currentSearchQuery) {
         searchNodes(state.currentSearchQuery);
-      } else {
-        const selectedNodeId = getSelectedNodeId();
-        if (selectedNodeId) {
-          applyHoverTrace(selectedNodeId);
-        }
       }
     }
 

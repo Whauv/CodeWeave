@@ -53,8 +53,10 @@ def get_or_create_user(identity: str) -> int:
     now = _utc_now()
     conn = _connect()
     try:
+        conn.execute("INSERT OR IGNORE INTO users(identity, created_at) VALUES (?, ?)", (identity, now))
         row = conn.execute("SELECT id FROM users WHERE identity = ?", (identity,)).fetchone()
         if row:
+            conn.commit()
             return int(row["id"])
         cursor = conn.execute("INSERT INTO users(identity, created_at) VALUES (?, ?)", (identity, now))
         conn.commit()
