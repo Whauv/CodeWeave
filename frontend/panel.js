@@ -82,6 +82,15 @@ const PRODUCT_COLLAB_STATE_KEY = "codeweave-collab-state-v1";
 let workspaceList = [];
 let activeInvestigationSessionId = null;
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function fetchJsonWithFallback(urls, options = {}) {
   let lastError = "Request failed";
   for (const url of urls) {
@@ -346,13 +355,20 @@ function renderChatSessions() {
     .forEach((session) => {
       const button = document.createElement("button");
       button.className = `chat-session-chip ${session.id === activeChatSessionId ? "active" : ""}`;
-      button.innerHTML = `
-        <span class="chat-session-chip-inner">
-          <span class="chat-session-label">${session.title || "Untitled thread"}</span>
-          <span class="chat-session-meta">${session.nodeName || "Project"}</span>
-        </span>
-        <span class="chip-delete-btn" title="Delete conversation">x</span>
-      `;
+      const sessionInner = document.createElement("span");
+      sessionInner.className = "chat-session-chip-inner";
+      const sessionTitle = document.createElement("span");
+      sessionTitle.className = "chat-session-label";
+      sessionTitle.textContent = session.title || "Untitled thread";
+      const sessionMeta = document.createElement("span");
+      sessionMeta.className = "chat-session-meta";
+      sessionMeta.textContent = session.nodeName || "Project";
+      sessionInner.append(sessionTitle, sessionMeta);
+      const deleteButton = document.createElement("span");
+      deleteButton.className = "chip-delete-btn";
+      deleteButton.title = "Delete conversation";
+      deleteButton.textContent = "x";
+      button.append(sessionInner, deleteButton);
       button.addEventListener("click", async (event) => {
         if (event.target instanceof HTMLElement && event.target.classList.contains("chip-delete-btn")) {
           event.stopPropagation();
@@ -546,14 +562,14 @@ function renderActionPlan(plan) {
   const checklist = Array.isArray(plan.staged_checklist) ? plan.staged_checklist : [];
 
   container.innerHTML = `
-    <div><strong>${plan.summary || "Action plan generated."}</strong></div>
+    <div><strong>${escapeHtml(plan.summary || "Action plan generated.")}</strong></div>
     <div><span class="muted">Impacted files:</span> ${(plan.impacted_files || []).length} | <span class="muted">Modules:</span> ${(plan.impacted_modules || []).length}</div>
     <div><strong>Risk hotspots</strong></div>
-    <ul>${hotspots.length ? hotspots.map((item) => `<li>${item.name} (${item.status}, churn ${item.churn_count})</li>`).join("") : "<li>No elevated hotspots detected.</li>"}</ul>
+    <ul>${hotspots.length ? hotspots.map((item) => `<li>${escapeHtml(item.name)} (${escapeHtml(item.status)}, churn ${Number(item.churn_count) || 0})</li>`).join("") : "<li>No elevated hotspots detected.</li>"}</ul>
     <div><strong>Test focus</strong></div>
-    <ul>${tests.length ? tests.map((item) => `<li>${item}</li>`).join("") : "<li>Add focused tests around impacted call paths.</li>"}</ul>
+    <ul>${tests.length ? tests.map((item) => `<li>${escapeHtml(item)}</li>`).join("") : "<li>Add focused tests around impacted call paths.</li>"}</ul>
     <div><strong>Checklist</strong></div>
-    <ul>${checklist.length ? checklist.map((item) => `<li>${item}</li>`).join("") : "<li>Validate changes before rollout.</li>"}</ul>
+    <ul>${checklist.length ? checklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("") : "<li>Validate changes before rollout.</li>"}</ul>
   `;
   if (exportButton) {
     exportButton.disabled = !String(plan.markdown || "").trim();
@@ -668,7 +684,7 @@ async function generateActionPlan() {
     renderActionPlan(null);
     const fallback = document.getElementById("action-plan-content");
     if (fallback) {
-      fallback.innerHTML = `<div class="muted">Could not generate action plan: ${error.message}</div>`;
+      fallback.innerHTML = `<div class="muted">Could not generate action plan: ${escapeHtml(error.message)}</div>`;
     }
   }
 }
@@ -781,9 +797,17 @@ async function createShareLink() {
     const shareLink = result.share_link || {};
     const shareUrl = String(shareLink.url || "");
     if (output) {
-      output.innerHTML = shareUrl
-        ? `<a href="${shareUrl}" target="_blank" rel="noreferrer">${shareUrl}</a>`
-        : `Token: ${shareLink.token || "unknown"}`;
+      output.textContent = "";
+      if (shareUrl) {
+        const link = document.createElement("a");
+        link.href = shareUrl;
+        link.target = "_blank";
+        link.rel = "noreferrer noopener";
+        link.textContent = shareUrl;
+        output.appendChild(link);
+      } else {
+        output.textContent = `Token: ${String(shareLink.token || "unknown")}`;
+      }
     }
     if (shareUrl && navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(shareUrl).catch(() => {});
@@ -863,7 +887,12 @@ function renderInvestigationSessionList(sessions) {
     const button = document.createElement("button");
     button.className = "linked-item";
     const timestamp = String(session.updated_at || "").replace("T", " ").replace("Z", "");
-    button.innerHTML = `<span>${session.title || "Untitled investigation"}</span><span class="linked-meta">${timestamp || "saved"}</span>`;
+    const title = document.createElement("span");
+    title.textContent = session.title || "Untitled investigation";
+    const meta = document.createElement("span");
+    meta.className = "linked-meta";
+    meta.textContent = timestamp || "saved";
+    button.append(title, meta);
     button.addEventListener("click", async () => {
       await loadInvestigationSession(session.id);
     });
@@ -963,7 +992,12 @@ async function analyzePullRequest() {
     impactedNodes.slice(0, 25).forEach((node) => {
       const button = document.createElement("button");
       button.className = "linked-item";
-      button.innerHTML = `<span>${node.name || node.id}</span><span class="linked-meta">${node.file || node.status || "changed"}</span>`;
+      const title = document.createElement("span");
+      title.textContent = node.name || node.id;
+      const meta = document.createElement("span");
+      meta.className = "linked-meta";
+      meta.textContent = node.file || node.status || "changed";
+      button.append(title, meta);
       button.addEventListener("click", () => {
         if (typeof window.clearGraphTransientFocus === "function") {
           window.clearGraphTransientFocus();
@@ -1013,7 +1047,12 @@ function bindCollaborationActions() {
 function makeLinkedNodeItem(node, graphData) {
   const button = document.createElement("button");
   button.className = "linked-item";
-  button.innerHTML = `<span>${node.name}</span><span class="linked-meta">${node.type || "node"}</span>`;
+  const title = document.createElement("span");
+  title.textContent = node.name;
+  const meta = document.createElement("span");
+  meta.className = "linked-meta";
+  meta.textContent = node.type || "node";
+  button.append(title, meta);
   button.addEventListener("click", () => {
     if (typeof window.clearGraphTransientFocus === "function") {
       window.clearGraphTransientFocus();
@@ -1063,18 +1102,18 @@ function renderProjectInsights(insights) {
   const coupling = Array.isArray(insights.tight_coupling) ? insights.tight_coupling.slice(0, 2) : [];
   const deadCode = Array.isArray(insights.dead_code_candidates) ? insights.dead_code_candidates.slice(0, 3) : [];
 
-  const lines = [`<div>${summary}</div>`];
+  const lines = [`<div>${escapeHtml(summary)}</div>`];
   if (fanIn.length) {
-    lines.push(`<div><strong>High fan-in:</strong> ${fanIn.map((item) => `${item.name} (${item.score})`).join(", ")}</div>`);
+    lines.push(`<div><strong>High fan-in:</strong> ${fanIn.map((item) => `${escapeHtml(item.name)} (${Number(item.score) || 0})`).join(", ")}</div>`);
   }
   if (fanOut.length) {
-    lines.push(`<div><strong>High fan-out:</strong> ${fanOut.map((item) => `${item.name} (${item.score})`).join(", ")}</div>`);
+    lines.push(`<div><strong>High fan-out:</strong> ${fanOut.map((item) => `${escapeHtml(item.name)} (${Number(item.score) || 0})`).join(", ")}</div>`);
   }
   if (coupling.length) {
-    lines.push(`<div><strong>Tight coupling:</strong> ${coupling.map((item) => `${item.left} ↔ ${item.right}`).join(", ")}</div>`);
+    lines.push(`<div><strong>Tight coupling:</strong> ${coupling.map((item) => `${escapeHtml(item.left)} <-> ${escapeHtml(item.right)}`).join(", ")}</div>`);
   }
   if (deadCode.length) {
-    lines.push(`<div><strong>Dead-code candidates:</strong> ${deadCode.map((item) => item.name).join(", ")}</div>`);
+    lines.push(`<div><strong>Dead-code candidates:</strong> ${deadCode.map((item) => escapeHtml(item.name)).join(", ")}</div>`);
   }
 
   container.innerHTML = lines.join("");
@@ -1299,3 +1338,4 @@ window.showBlastInfo = showBlastInfo;
 window.hidePanel = hidePanel;
 window.getMutationBadgeHTML = getMutationBadgeHTML;
 window.renderProjectInsights = renderProjectInsights;
+
