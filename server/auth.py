@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import os
 import secrets
 import time
@@ -37,6 +38,12 @@ def _security_secret() -> str:
     secret = os.getenv("CODEWEAVE_SECURITY_SECRET", "").strip()
     if secret:
         return secret
+    if _session_enabled() or _csrf_enabled():
+        raise ApiError(
+            "security_secret_required",
+            "CODEWEAVE_SECURITY_SECRET must be set when session or CSRF protection is enabled.",
+            500,
+        )
     tokens = sorted(_allowed_tokens())
     if tokens:
         return hashlib.sha256("|".join(tokens).encode("utf-8")).hexdigest()
@@ -81,12 +88,30 @@ def _verify_signed_token(kind: str, identity: str, token: str) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
+def _trust_client_identity_header() -> bool:
+    return os.getenv("CODEWEAVE_TRUST_CLIENT_IDENTITY", "off").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_loopback_request() -> bool:
+    remote_addr = str(request.remote_addr or "").strip()
+    if not remote_addr:
+        return False
+    try:
+        return ipaddress.ip_address(remote_addr).is_loopback
+    except ValueError:
+        return False
+
+
 def _identity_from_request() -> str:
     explicit = str(request.headers.get("X-Codeweave-User") or "").strip()
-    if explicit:
+    if explicit and (_trust_client_identity_header() or _is_loopback_request()):
         return explicit[:200]
     ip = str(request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
     return f"ip:{ip or 'unknown'}"
+
+
+def resolve_untrusted_identity() -> str:
+    return _identity_from_request()
 
 
 def resolve_request_identity() -> str:

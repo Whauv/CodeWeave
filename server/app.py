@@ -39,6 +39,7 @@ from server.auth import (
     get_request_identity,
     issue_security_cookies,
     require_auth,
+    resolve_untrusted_identity,
     set_request_identity,
 )
 from server.chat_service import chat_with_provider
@@ -160,7 +161,7 @@ def handle_large_payload(_exc: RequestEntityTooLarge) -> Any:
 def _setup_request_context() -> None:
     request_id = str(request.headers.get("X-Request-Id") or uuid.uuid4())
     REQUEST_ID.set(request_id)
-    identity_hint = str(request.headers.get("X-Codeweave-User") or request.remote_addr or "anonymous")
+    identity_hint = resolve_untrusted_identity()
     set_request_identity(identity_hint)
     STATE.reset()
     request.__codeweave_started_at = time.perf_counter()
