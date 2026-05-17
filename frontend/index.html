@@ -1,2189 +1,575 @@
-<!DOCTYPE html>
-<html lang="en">
-
+﻿<!doctype html>
+<html lang="en" data-theme="dark">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CodeMapper</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="CodeWeave by Pranav Chopdekar (Whauv): architecture-aware code intelligence for dependency mapping and blast-radius clarity." />
+  <title>CodeWeave | See Architecture Before You Change It</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0d0d0d;
-      --bg-soft: #131516;
-      --panel: rgba(20, 24, 25, 0.88);
-      --panel-strong: rgba(13, 16, 17, 0.94);
-      --border: rgba(255, 255, 255, 0.08);
-      --border-strong: rgba(255, 255, 255, 0.16);
-      --text: #f4f1e8;
-      --muted: #9ea7a3;
-      --accent: #ff8c42;
-      --accent-soft: #f5c85b;
-      --accent-cool: #66d7d1;
-      --danger: #ff5b4d;
-      --summary-text: #f6dfb8;
-      --graph-link: rgba(149, 193, 214, 0.34);
-      --graph-link-muted: rgba(149, 193, 214, 0.14);
-      --graph-link-force: #444444;
-      --graph-label: #d9e3e8;
-      --graph-node-stroke: #111111;
-      --graph-node-selected: #ffcc00;
-      --shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+      --bg: #101214;
+      --bg-2: #15191d;
+      --bg-3: #1b2025;
+      --text: #edf1f4;
+      --muted: #a5afb8;
+      --line: #2f3943;
+      --accent: #b98646;
+      --accent-soft: #d3ac78;
+      --ok: #7ea58e;
+      --max: 1160px;
+      --r: 4px;
+      --r2: 2px;
+    }
+    html[data-theme="light"] {
+      --bg: #f4f6f8;
+      --bg-2: #ffffff;
+      --bg-3: #eef2f5;
+      --text: #181f26;
+      --muted: #5d6b78;
+      --line: #d4dde6;
+      --accent: #9a6425;
+      --accent-soft: #7d521f;
+      --ok: #4f7f60;
     }
 
-    body[data-theme="light"] {
-      --bg: #eef4f7;
-      --bg-soft: #f5f9fb;
-      --panel: rgba(255, 255, 255, 0.82);
-      --panel-strong: rgba(247, 251, 253, 0.96);
-      --border: rgba(23, 45, 62, 0.11);
-      --border-strong: rgba(23, 45, 62, 0.22);
-      --text: #163042;
-      --muted: #5e7483;
-      --accent: #1570ef;
-      --accent-soft: #7cc4fa;
-      --accent-cool: #0ea5a4;
-      --danger: #d93f52;
-      --summary-text: #1f455f;
-      --graph-link: rgba(56, 101, 134, 0.5);
-      --graph-link-muted: rgba(56, 101, 134, 0.24);
-      --graph-link-force: #6d8293;
-      --graph-label: #173a54;
-      --graph-node-stroke: #45627a;
-      --graph-node-selected: #1570ef;
-      --shadow: 0 24px 60px rgba(28, 65, 93, 0.12);
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    html,
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
     body {
-      margin: 0;
-      min-height: 100%;
-      background:
-        radial-gradient(circle at top left, rgba(102, 215, 209, 0.12), transparent 30%),
-        radial-gradient(circle at top right, rgba(255, 140, 66, 0.18), transparent 35%),
-        linear-gradient(180deg, #171311 0%, #0d0d0d 100%);
+      font-family: Inter, system-ui, sans-serif;
       color: var(--text);
-      font-family: "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
-    }
-
-    body {
-      overflow: hidden;
+      background: var(--bg);
+      line-height: 1.55;
+      letter-spacing: .01em;
+      position: relative;
       overflow-x: hidden;
     }
 
-    body[data-theme="light"] {
-      background:
-        radial-gradient(circle at top left, rgba(21, 112, 239, 0.12), transparent 30%),
-        radial-gradient(circle at top right, rgba(14, 165, 164, 0.1), transparent 35%),
-        linear-gradient(180deg, #f7fbfd 0%, #e7eef4 100%);
-    }
-
-    .shell {
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      padding: clamp(12px, 1.5vw, 18px);
-      gap: clamp(10px, 1.2vw, 14px);
-    }
-
-    .top-frame,
-    .main-frame,
-    .detail-shell,
-    .metric-card,
-    .legend,
-    .empty-state {
-      border: 1px solid var(--border);
-      background: var(--panel);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(18px);
-    }
-
-    .scan-overlay {
-      position: absolute;
-      inset: 0;
-      z-index: 8;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      background: radial-gradient(circle at center, rgba(18, 22, 23, 0.72), rgba(7, 8, 9, 0.92));
-      backdrop-filter: blur(10px);
-    }
-
-    .scan-overlay.visible {
-      display: flex;
-    }
-
-    .history-overlay {
-      position: absolute;
-      inset: 0;
-      z-index: 12;
-      display: none;
-      align-items: flex-end;
-      justify-content: center;
-      padding: 18px;
-      background: linear-gradient(180deg, rgba(6, 8, 9, 0.08), rgba(6, 8, 9, 0.56));
-      pointer-events: none;
-    }
-
-    .history-overlay.visible {
-      display: flex;
-    }
-
-    .history-card {
-      width: min(880px, calc(100% - 12px));
-      display: grid;
-      gap: 14px;
-      padding: 18px;
-      border-radius: 24px;
-      border: 1px solid var(--border);
-      background: rgba(14, 17, 18, 0.95);
-      box-shadow: var(--shadow);
-      pointer-events: auto;
-    }
-
-    body[data-theme="light"] .history-card {
-      background: rgba(249, 252, 254, 0.97);
-    }
-
-    .history-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 14px;
-    }
-
-    .history-title {
-      margin: 0 0 6px;
-      font-size: 1.1rem;
-    }
-
-    .history-copy {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.5;
-      font-size: 0.92rem;
-    }
-
-    .history-controls {
-      display: grid;
-      gap: 12px;
-    }
-
-    .history-topbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .history-stepper {
-      display: inline-flex;
-      gap: 8px;
-      align-items: center;
-    }
-
-    .history-speed-shell {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      min-height: 38px;
-      padding: 0 12px;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--muted);
-      font-size: 0.86rem;
-    }
-
-    .history-speed-shell select {
-      border: 0;
-      outline: 0;
-      background: transparent;
-      color: var(--text);
-      font: inherit;
-      cursor: pointer;
-    }
-
-    .history-scrub-row {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
-      gap: 12px;
-      align-items: center;
-    }
-
-    .history-range {
-      width: 100%;
-      accent-color: var(--accent);
-    }
-
-    .history-commit-card {
-      display: grid;
-      gap: 8px;
-      padding: 14px;
-      border-radius: 18px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.03);
-    }
-
-    .history-diff-card {
-      display: grid;
-      gap: 8px;
-      padding: 12px;
-      border-radius: 14px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.03);
-      max-height: 320px;
-      overflow: auto;
-    }
-
-    .history-diff-summary,
-    .history-diff-empty,
-    .history-diff-more {
-      color: var(--muted);
-      font-size: 0.84rem;
-      line-height: 1.4;
-    }
-
-    .history-diff-list {
-      margin: 0;
-      padding: 0;
-      list-style: none;
-      display: grid;
-      gap: 6px;
-    }
-
-    .history-diff-list li {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      font-size: 0.83rem;
-      color: var(--text);
-      min-width: 0;
-    }
-
-    .history-diff-status {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 20px;
-      height: 20px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--accent-soft);
-      font-size: 0.73rem;
-      flex: 0 0 auto;
-    }
-
-    .history-diff-old {
-      color: var(--muted);
-      text-decoration: line-through;
-      font-size: 0.8rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 42%;
-    }
-
-    .history-diff-path {
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      min-width: 0;
-      flex: 1;
-    }
-
-    .history-diff-badges {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .history-diff-count {
-      display: inline-flex;
-      align-items: center;
-      min-height: 24px;
-      padding: 0 9px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--text);
-      font-size: 0.76rem;
-    }
-
-    .history-diff-patch {
-      border-top: 1px solid var(--border);
-      padding-top: 8px;
-    }
-
-    .history-diff-patch summary {
-      cursor: pointer;
-      color: var(--muted);
-      font-size: 0.82rem;
-      margin-bottom: 8px;
-    }
-
-    .history-diff-patch pre {
-      margin: 0;
-      padding: 10px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: rgba(0, 0, 0, 0.24);
-      color: var(--text);
-      font-size: 0.74rem;
-      line-height: 1.35;
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-height: 220px;
-      overflow: auto;
-    }
-
-    .history-commit-line {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-      color: var(--muted);
-      font-size: 0.9rem;
-    }
-
-    .history-commit-title {
-      font-size: 1rem;
-      color: var(--text);
-      font-weight: 600;
-      line-height: 1.4;
-    }
-
-    .history-badge {
-      display: inline-flex;
-      align-items: center;
-      min-height: 30px;
-      padding: 0 10px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text);
-      font-size: 0.84rem;
-    }
-
-    .scan-card {
-      width: min(360px, calc(100% - 40px));
-      padding: 24px;
-      border-radius: 26px;
-      border: 1px solid var(--border);
-      background: rgba(17, 20, 21, 0.92);
-      box-shadow: var(--shadow);
-      text-align: center;
-    }
-
-    .scan-ring-stack {
-      position: relative;
-      width: 118px;
-      height: 118px;
-      margin: 0 auto 18px;
-    }
-
-    .scan-ring,
-    .scan-core {
-      position: absolute;
-      inset: 0;
-      border-radius: 999px;
-    }
-
-    .scan-ring {
-      border: 2px solid transparent;
-      border-top-color: var(--accent);
-      border-right-color: var(--accent-soft);
-      animation: orbitSpin 1.2s linear infinite;
-    }
-
-    .scan-ring.ring-two {
-      inset: 12px;
-      border-top-color: var(--accent-cool);
-      border-right-color: var(--accent);
-      animation-duration: 1.8s;
-      animation-direction: reverse;
-    }
-
-    .scan-ring.ring-three {
-      inset: 28px;
-      border-top-color: var(--accent-soft);
-      border-right-color: var(--accent-cool);
-      animation-duration: 0.95s;
-    }
-
-    .scan-core {
-      inset: 40px;
-      background: radial-gradient(circle, rgba(255, 140, 66, 0.92), rgba(102, 215, 209, 0.14));
-      box-shadow: 0 0 22px rgba(255, 140, 66, 0.35);
-      animation: corePulse 1.7s ease-in-out infinite;
-    }
-
-    @keyframes orbitSpin {
-      from {
-        transform: rotate(0deg);
-      }
-
-      to {
-        transform: rotate(360deg);
-      }
-    }
-
-    @keyframes corePulse {
-
-      0%,
-      100% {
-        transform: scale(0.9);
-        opacity: 0.8;
-      }
-
-      50% {
-        transform: scale(1.08);
-        opacity: 1;
-      }
-    }
-
-    .scan-title {
-      margin: 0 0 10px;
-      font-size: 1.25rem;
-    }
-
-    .scan-copy {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.6;
-    }
-
-    .top-frame {
-      display: grid;
-      grid-template-columns: minmax(220px, 260px) minmax(0, 1.2fr) minmax(260px, 320px);
-      gap: 14px;
-      padding: 18px;
-      border-radius: 26px;
-      min-height: 132px;
-      align-items: start;
-    }
-
-    .brand-block {
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    .eyebrow {
-      text-transform: uppercase;
-      letter-spacing: 0.24em;
-      font-size: 0.72rem;
-      color: var(--accent-soft);
-    }
-
-    .brand-title {
-      margin: 0;
-      font-size: clamp(1.8rem, 2.6vw, 2.6rem);
-      line-height: 0.95;
-    }
-
-    .brand-copy {
-      margin: 0;
-      max-width: 30ch;
-      color: var(--muted);
-      line-height: 1.5;
-      word-break: break-word;
-    }
-
-    .controls-block {
-      display: grid;
-      grid-template-rows: auto auto;
-      gap: 14px;
-      min-width: 0;
-      align-content: start;
-    }
-
-    .control-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(150px, 170px) minmax(140px, 150px) minmax(220px, 0.8fr);
-      gap: 12px;
-    }
-
-    .field-shell {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 0 14px;
-      border-radius: 16px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.03);
-      min-height: 52px;
-    }
-
-    .field-shell input,
-    .field-shell select {
-      width: 100%;
-      border: 0;
-      outline: 0;
-      background: transparent;
-      color: var(--text);
-      font-size: 0.98rem;
-      font-family: inherit;
-    }
-
-    .field-shell select {
-      cursor: pointer;
-      appearance: none;
-    }
-
-    .field-icon {
-      color: var(--muted);
-      font-size: 0.92rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-
-    .action-btn,
-    .ghost-btn,
-    .modal-close,
-    .panel-close,
-    .linked-item {
-      font-family: inherit;
-    }
-
-    .action-btn,
-    .ghost-btn,
-    .modal-close,
-    .panel-close {
-      border: 1px solid var(--border);
-      color: var(--text);
-      cursor: pointer;
-      transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
-    }
-
-    .action-btn:hover,
-    .ghost-btn:hover,
-    .modal-close:hover,
-    .panel-close:hover {
-      transform: translateY(-1px);
-      border-color: var(--border-strong);
-    }
-
-    .action-btn {
-      border-radius: 16px;
-      background: linear-gradient(135deg, var(--accent), var(--accent-soft));
-      color: #16110f;
-      font-weight: 700;
-      font-size: 0.98rem;
-    }
-
-    body[data-theme="light"] .action-btn {
-      color: #f8fbff;
-    }
-
-    .status-row {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-      min-width: 0;
-    }
-
-    .view-toggle-row {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-items: center;
-      min-width: 0;
-    }
-
-    .scan-history-shell {
-      display: grid;
-      gap: 8px;
-    }
-
-    .scan-history-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-    }
-
-    .scan-history-title {
-      font-size: 0.78rem;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-
-    .scan-history-list {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      padding-bottom: 2px;
-    }
-
-    .scan-history-empty {
-      color: var(--muted);
-      font-size: 0.84rem;
-      line-height: 1.4;
-      padding: 4px 0;
-    }
-
-    .scan-history-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      max-width: 260px;
-      min-height: 34px;
-      padding: 0 12px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--text);
-      cursor: pointer;
-      flex: 0 0 auto;
-      white-space: nowrap;
-      transition: transform 0.18s ease, border-color 0.18s ease;
-    }
-
-    .scan-history-chip-inner {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-      flex: 1;
-    }
-
-    .scan-history-chip:hover {
-      transform: translateY(-1px);
-      border-color: var(--border-strong);
-    }
-
-    .scan-history-chip.active {
-      border-color: rgba(255, 140, 66, 0.35);
-      background: rgba(255, 140, 66, 0.12);
-      color: var(--accent-soft);
-    }
-
-    body[data-theme="light"] .scan-history-chip.active {
-      border-color: rgba(21, 112, 239, 0.28);
-      background: rgba(21, 112, 239, 0.12);
-      color: var(--accent);
-    }
-
-    .scan-history-kind {
-      color: var(--muted);
-      font-size: 0.72rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .scan-history-label {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      font-size: 0.84rem;
-    }
-
-    .chip-delete-btn {
-      width: 20px;
-      height: 20px;
-      padding: 0;
-      border-radius: 999px;
-      border: 1px solid transparent;
-      background: transparent;
-      color: var(--muted);
-      cursor: pointer;
-      flex: 0 0 auto;
-      line-height: 1;
-    }
-
-    .chip-delete-btn:hover {
-      border-color: var(--border-strong);
-      color: var(--text);
-      background: rgba(255, 255, 255, 0.06);
-    }
-
-    .status-pill,
-    .mini-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      min-height: 36px;
-      padding: 0 12px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--muted);
-      font-size: 0.9rem;
-    }
-
-    .mini-pill strong {
-      color: var(--text);
-      font-size: 1rem;
-    }
-
-    .summary-block {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      align-content: start;
-    }
-
-    .metric-card {
-      border-radius: 18px;
-      padding: 16px;
-    }
-
-    .metric-label {
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.18em;
-      font-size: 0.72rem;
-      margin-bottom: 10px;
-    }
-
-    .metric-value {
-      font-size: 1.9rem;
-      font-weight: 700;
-      margin-bottom: 8px;
-    }
-
-    .metric-note {
-      color: var(--muted);
-      line-height: 1.4;
-      font-size: 0.92rem;
-    }
-
-    .main-frame {
-      flex: 1;
-      min-height: 0;
-      display: grid;
-      grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.78fr);
-      gap: 14px;
-      border-radius: 30px;
-      padding: 14px;
-    }
-
-    .main-frame[data-view="graph"] {
-      grid-template-columns: 1fr 0;
-    }
-
-    .main-frame[data-view="panel"] {
-      grid-template-columns: 0 minmax(420px, 1fr);
-    }
-
-    .main-frame[data-view="graph"] .detail-shell,
-    .main-frame[data-view="panel"] .graph-shell {
-      opacity: 0;
-      pointer-events: none;
-      min-width: 0;
-      border-width: 0;
-    }
-
-    .pane-divider {
-      position: relative;
-      width: 14px;
-      margin: 0 -4px;
-      cursor: col-resize;
-      z-index: 3;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .pane-divider::before {
+    /* Signature background: dependency pathways (not generic grid) */
+    body::before,
+    body::after {
       content: "";
-      width: 4px;
-      height: 92px;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.12);
-      transition: background 0.18s ease, transform 0.18s ease;
-    }
-
-    .pane-divider:hover::before,
-    .pane-divider.dragging::before {
-      background: rgba(255, 140, 66, 0.55);
-      transform: scaleX(1.1);
-    }
-
-    body[data-theme="light"] .pane-divider::before {
-      background: rgba(23, 45, 62, 0.16);
-    }
-
-    body[data-theme="light"] .pane-divider:hover::before,
-    body[data-theme="light"] .pane-divider.dragging::before {
-      background: rgba(21, 112, 239, 0.42);
-    }
-
-    .graph-shell,
-    .detail-shell {
-      position: relative;
-      min-height: 0;
-      border-radius: 24px;
-      overflow: hidden;
-      background: var(--panel-strong);
-      contain: layout paint style;
-    }
-
-    .graph-shell::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background-image:
-        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-      background-size: 44px 44px;
-      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.8), transparent 95%);
-      pointer-events: none;
-    }
-
-    body[data-theme="light"] .graph-shell::before {
-      background-image:
-        linear-gradient(rgba(18, 48, 66, 0.05) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(18, 48, 66, 0.05) 1px, transparent 1px);
-    }
-
-    .graph-toolbar {
-      position: absolute;
-      top: 16px;
-      left: 16px;
-      right: 16px;
-      z-index: 6;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 12px;
-      flex-wrap: wrap;
-      pointer-events: none;
-    }
-
-    .graph-subbar {
-      position: absolute;
-      top: 122px;
-      left: 16px;
-      right: auto;
-      max-width: calc(100% - 300px);
-      z-index: 6;
-      display: flex;
-      align-items: center;
-      justify-content: flex-start;
-      gap: 12px;
-      pointer-events: none;
-    }
-
-    .toolbar-group {
-      display: flex;
-      gap: 10px;
-      row-gap: 8px;
-      flex-wrap: wrap;
-      pointer-events: auto;
-      align-items: center;
-      align-content: flex-start;
-      min-width: 0;
-      max-width: min(100%, calc(100% - 236px));
-    }
-
-    .breadcrumb-bar,
-    .graph-progress-shell {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      pointer-events: auto;
-      min-width: 0;
-    }
-
-    .breadcrumb-bar {
-      flex: 1 1 auto;
-      overflow: hidden;
-    }
-
-    .breadcrumb-bar:empty {
-      display: none;
-    }
-
-    .graph-progress-shell {
-      flex: 0 0 auto;
-    }
-
-    .breadcrumb-chip {
-      min-height: 34px;
-      padding: 0 12px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text);
-      cursor: pointer;
-    }
-
-    .breadcrumb-sep {
-      color: var(--muted);
-      font-size: 0.86rem;
-    }
-
-    .graph-progress-pill {
-      display: inline-flex;
-      align-items: center;
-      min-height: 34px;
-      padding: 0 12px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--muted);
-      font-size: 0.86rem;
-    }
-
-    .toolbar-inline-control {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      min-height: 34px;
-      padding: 0 10px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--muted);
-      font-size: 0.8rem;
-      pointer-events: auto;
-    }
-
-    .toolbar-inline-control input[type="range"] {
-      width: 92px;
-      accent-color: var(--accent);
-    }
-
-    .graph-progress-pill strong {
-      color: var(--text);
-      margin-left: 6px;
-    }
-
-    .legend {
-      display: grid;
-      gap: 10px;
-      border-radius: 18px;
-      padding: 14px;
-      min-width: 214px;
-      max-width: 100%;
-    }
-
-    .legend-title {
-      font-size: 0.82rem;
-      letter-spacing: 0.16em;
-      color: var(--muted);
-      text-transform: uppercase;
-    }
-
-    .legend-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      font-size: 0.88rem;
-      color: var(--text);
-    }
-
-    .legend-dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 999px;
-      flex: 0 0 auto;
-    }
-
-    .legend-name {
-      flex: 1;
-      color: var(--muted);
-    }
-
-    .ghost-btn {
-      min-height: 38px;
-      border-radius: 12px;
-      padding: 0 14px;
-      background: rgba(255, 255, 255, 0.05);
-    }
-
-    .ghost-btn.active {
-      background: rgba(255, 140, 66, 0.16);
-      border-color: rgba(255, 140, 66, 0.45);
-      color: var(--accent-soft);
-    }
-
-    #history-play-btn.active {
-      background: linear-gradient(135deg, rgba(255, 140, 66, 0.36), rgba(102, 215, 209, 0.22));
-      border-color: rgba(255, 200, 91, 0.64);
-      color: #fff2d2;
-      animation: historyPulse 1.4s ease-in-out infinite;
-    }
-
-    @keyframes historyPulse {
-      0%,
-      100% {
-        box-shadow: 0 0 0 0 rgba(255, 140, 66, 0.34);
-      }
-      50% {
-        box-shadow: 0 0 0 8px rgba(255, 140, 66, 0.08);
-      }
-    }
-
-    #graph-container {
-      width: 100%;
-      height: 100%;
-      box-sizing: border-box;
-      padding-top: 156px;
-    }
-
-    #graph-svg {
-      width: 100%;
-      height: 100%;
-      display: block;
-      position: relative;
-      z-index: 1;
-      transform: translateZ(0);
-      will-change: transform;
-    }
-
-    .node-tooltip {
-      position: absolute;
-      z-index: 9;
-      max-width: 280px;
-      padding: 10px 12px;
-      border-radius: 14px;
-      border: 1px solid var(--border);
-      background: rgba(12, 16, 18, 0.94);
-      color: var(--text);
-      box-shadow: var(--shadow);
-      pointer-events: none;
-      opacity: 0;
-      transform: translateY(6px);
-      transition: opacity 0.14s ease, transform 0.14s ease;
-    }
-
-    body[data-theme="light"] .node-tooltip {
-      background: rgba(252, 254, 255, 0.96);
-    }
-
-    .node-tooltip.visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .node-tooltip-title {
-      font-size: 0.82rem;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--accent-soft);
-      margin-bottom: 6px;
-    }
-
-    .node-tooltip-body {
-      line-height: 1.5;
-      color: var(--text);
-      font-size: 0.92rem;
-    }
-
-    .empty-state {
-      position: absolute;
-      inset: 50% auto auto 50%;
-      transform: translate(-50%, -50%);
-      width: min(540px, calc(100% - 40px));
-      z-index: 5;
-      border-radius: 26px;
-      padding: 24px;
-      text-align: left;
-      pointer-events: none;
-    }
-
-    .empty-state.hidden {
-      display: none;
-    }
-
-    .empty-title {
-      margin: 0 0 12px;
-      font-size: 1.7rem;
-      line-height: 1;
-    }
-
-    .empty-copy {
-      margin: 0 0 18px;
-      color: var(--muted);
-      line-height: 1.6;
-      max-width: 42ch;
-    }
-
-    .empty-points {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-
-    .empty-point {
-      padding: 10px 12px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--text);
-      font-size: 0.86rem;
-    }
-
-    .detail-shell {
-      display: flex;
-      flex-direction: column;
-      padding: 18px;
-      gap: 14px;
-      backdrop-filter: none;
-    }
-
-    #detail-panel {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      min-height: 0;
-      overflow-y: auto;
-      padding-right: 4px;
-      overscroll-behavior: contain;
-      contain: content;
-      transform: translateZ(0);
-    }
-
-    #detail-panel.hidden {
-      display: none;
-    }
-
-    .detail-shell.hidden #detail-panel {
-      display: none;
-    }
-
-    .detail-shell.hidden .detail-placeholder {
-      display: flex;
-    }
-
-    .detail-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    .detail-placeholder {
-      display: none;
-      flex: 1;
-      align-items: center;
-      justify-content: center;
-      text-align: left;
-      color: var(--muted);
-      border: 1px dashed var(--border);
-      border-radius: 22px;
-      padding: 22px;
-      line-height: 1.6;
-    }
-
-    .panel-close {
-      width: 38px;
-      height: 38px;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.04);
-      font-size: 1.2rem;
-    }
-
-    .panel-card {
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 16px;
-      background: rgba(255, 255, 255, 0.03);
-    }
-
-    .panel-label {
-      color: var(--muted);
-      font-size: 0.78rem;
-      text-transform: uppercase;
-      letter-spacing: 0.16em;
-      margin-bottom: 10px;
-    }
-
-    #node-name {
-      font-size: 1.8rem;
-      font-weight: 700;
-      margin-bottom: 10px;
-      line-height: 1;
-    }
-
-    #node-file,
-    #churn-info {
-      color: var(--muted);
-      font-family: Consolas, monospace;
-      font-size: 0.88rem;
-      line-height: 1.5;
-      word-break: break-word;
-    }
-
-    #node-summary {
-      line-height: 1.65;
-      color: var(--summary-text);
-      font-size: 1rem;
-    }
-
-    #mutation-badge {
-      margin-bottom: 12px;
-    }
-
-    .panel-actions {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-top: 14px;
-    }
-
-    .panel-actions .panel-action {
-      flex: 1 1 180px;
-    }
-
-    .panel-action {
-      min-height: 38px;
-      padding: 0 14px;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--text);
-      cursor: pointer;
-      transition: transform 0.18s ease, border-color 0.18s ease;
-    }
-
-    .panel-action:hover {
-      transform: translateY(-1px);
-      border-color: var(--border-strong);
-    }
-
-    .panel-action:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-      transform: none;
-    }
-
-    .mutation-badge {
-      display: inline-flex;
-      align-items: center;
-      padding: 7px 12px;
-      border-radius: 999px;
-      font-size: 0.74rem;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-
-    .list-wrap {
-      display: grid;
-      gap: 10px;
-    }
-
-    .linked-item {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 11px 12px;
-      border-radius: 14px;
-      border: 1px solid transparent;
-      background: rgba(255, 255, 255, 0.03);
-      color: var(--text);
-      text-align: left;
-      cursor: pointer;
-    }
-
-    .linked-item:hover {
-      border-color: rgba(255, 140, 66, 0.5);
-      background: rgba(255, 140, 66, 0.08);
-    }
-
-    .linked-meta {
-      color: var(--muted);
-      font-size: 0.8rem;
-    }
-
-    .epicenter {
-      animation: epicenterPulse 1.4s ease-in-out infinite;
-    }
-
-    @keyframes epicenterPulse {
-      0% {
-        filter: drop-shadow(0 0 4px rgba(168, 85, 247, 0.3));
-      }
-
-      50% {
-        filter: drop-shadow(0 0 14px rgba(168, 85, 247, 0.95));
-      }
-
-      100% {
-        filter: drop-shadow(0 0 4px rgba(168, 85, 247, 0.3));
-      }
-    }
-
-    .depth-group {
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      background: rgba(255, 255, 255, 0.02);
-      margin-bottom: 10px;
-      overflow: hidden;
-    }
-
-    .depth-group summary {
-      cursor: pointer;
-      padding: 12px 14px;
-      color: var(--accent-soft);
-      font-weight: 700;
-      list-style: none;
-    }
-
-    .depth-group summary::-webkit-details-marker {
-      display: none;
-    }
-
-    .depth-body {
-      padding: 0 12px 12px;
-      display: grid;
-      gap: 8px;
-    }
-
-    .chat-shell {
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      background: rgba(255, 255, 255, 0.02);
-      overflow: hidden;
-    }
-
-    .chat-toolbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.03);
-    }
-
-    .chat-panel-label,
-    .chat-toolbar-title {
-      text-transform: none;
-      letter-spacing: 0.02em;
-    }
-
-    .chat-toolbar-title {
-      font-size: 0.88rem;
-      color: var(--muted);
-      font-weight: 600;
-    }
-
-    .chat-toolbar-actions {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .chat-session-bar {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.02);
-    }
-
-    .chat-session-empty {
-      color: var(--muted);
-      font-size: 0.84rem;
-      line-height: 1.4;
-    }
-
-    .chat-session-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      max-width: 260px;
-      min-height: 44px;
-      padding: 8px 12px;
-      border-radius: 16px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--text);
-      cursor: pointer;
-      flex: 0 0 auto;
-    }
-
-    .chat-session-chip-inner {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 3px;
-      min-width: 0;
-      flex: 1;
-    }
-
-    .chat-session-chip.active {
-      border-color: rgba(255, 140, 66, 0.35);
-      background: rgba(255, 140, 66, 0.12);
-      color: var(--accent-soft);
-    }
-
-    body[data-theme="light"] .chat-session-chip.active {
-      border-color: rgba(21, 112, 239, 0.28);
-      background: rgba(21, 112, 239, 0.12);
-      color: var(--accent);
-    }
-
-    .chat-session-label {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-size: 0.84rem;
-      font-weight: 600;
-      max-width: 100%;
-    }
-
-    .chat-session-meta {
-      color: var(--muted);
-      font-size: 0.74rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 100%;
-    }
-
-    .chat-messages {
-      max-height: 260px;
-      min-height: 120px;
-      overflow-y: auto;
-      display: grid;
-      gap: 8px;
-      padding: 12px;
-    }
-
-    .chat-empty {
-      color: var(--muted);
-      font-size: 0.9rem;
-      line-height: 1.5;
-    }
-
-    .chat-message {
-      padding: 10px 11px;
-      border-radius: 12px;
-      font-size: 0.9rem;
-      line-height: 1.45;
-      border: 1px solid var(--border);
-      word-break: break-word;
-      white-space: pre-wrap;
-    }
-
-    .chat-message.user {
-      background: rgba(255, 140, 66, 0.16);
-      border-color: rgba(255, 140, 66, 0.35);
-    }
-
-    .chat-message.assistant {
-      background: rgba(102, 215, 209, 0.12);
-      border-color: rgba(102, 215, 209, 0.28);
-    }
-
-    body[data-theme="light"] .chat-message.user {
-      background: rgba(21, 112, 239, 0.12);
-      border-color: rgba(21, 112, 239, 0.3);
-    }
-
-    body[data-theme="light"] .chat-message.assistant {
-      background: rgba(14, 165, 164, 0.12);
-      border-color: rgba(14, 165, 164, 0.3);
-    }
-
-    .chat-composer {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 10px;
-      padding: 10px;
-      border-top: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.02);
-      align-items: end;
-    }
-
-    #chat-input {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.02);
-      color: var(--text);
-      padding: 10px;
-      font: inherit;
-      min-height: 42px;
-      resize: vertical;
-      max-height: 140px;
-    }
-
-    #chat-input:focus {
-      outline: 0;
-      border-color: var(--border-strong);
-    }
-
-    #chat-send-btn {
-      min-width: 96px;
-    }
-
-    .chat-hint {
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 0.8rem;
-      line-height: 1.4;
-    }
-
-    .action-plan-block {
-      display: grid;
-      gap: 10px;
-    }
-
-    .action-plan-content {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.03);
-      padding: 10px;
-      color: var(--text);
-      font-size: 0.86rem;
-      line-height: 1.5;
-      max-height: 220px;
-      overflow: auto;
-    }
-
-    .action-plan-content .muted {
-      color: var(--muted);
-    }
-
-    .action-plan-content ul {
-      margin: 8px 0 0;
-      padding-left: 16px;
-    }
-
-    .action-plan-content li {
-      margin: 4px 0;
-    }
-
-    #monaco-modal {
       position: fixed;
       inset: 0;
-      z-index: 30;
-      display: none;
-      background: rgba(5, 7, 8, 0.88);
-      backdrop-filter: blur(14px);
+      pointer-events: none;
+      z-index: -2;
+    }
+    body::before {
+      background-image:
+        radial-gradient(circle at 12% 18%, color-mix(in oklab, var(--accent) 14%, transparent) 0 2px, transparent 2.5px),
+        radial-gradient(circle at 72% 26%, rgba(148,160,172,.20) 0 1.5px, transparent 2px),
+        radial-gradient(circle at 58% 74%, rgba(148,160,172,.16) 0 1.5px, transparent 2px),
+        radial-gradient(circle at 86% 62%, color-mix(in oklab, var(--accent) 10%, transparent) 0 2px, transparent 2.5px);
+      background-size: 540px 340px, 460px 300px, 520px 320px, 500px 300px;
+      background-position: -80px -20px, 40% 8%, 55% 65%, 90% 52%;
+      opacity: .45;
+    }
+    body::after {
+      background:
+        radial-gradient(1200px 380px at 50% -6%, rgba(255,255,255,.025), transparent 70%),
+        linear-gradient(120deg, transparent 0%, transparent 25%, rgba(160,174,187,.08) 25.2%, transparent 25.5%, transparent 100%),
+        linear-gradient(165deg, transparent 0%, transparent 58%, rgba(160,174,187,.07) 58.2%, transparent 58.5%, transparent 100%),
+        linear-gradient(160deg, transparent 0%, transparent 74%, color-mix(in oklab, var(--accent) 14%, transparent) 74.15%, transparent 74.5%, transparent 100%);
+      opacity: .25;
+      transform: translate3d(0,0,0);
+      animation: mapDrift 28s linear infinite;
     }
 
-    #monaco-modal.visible {
-      display: block;
+    html[data-theme="light"] body::before {
+      background-image:
+        radial-gradient(circle at 12% 18%, rgba(154,100,37,.22) 0 2px, transparent 2.6px),
+        radial-gradient(circle at 72% 26%, rgba(95,112,129,.30) 0 1.6px, transparent 2.2px),
+        radial-gradient(circle at 58% 74%, rgba(95,112,129,.25) 0 1.6px, transparent 2.2px),
+        radial-gradient(circle at 86% 62%, rgba(154,100,37,.18) 0 2px, transparent 2.6px);
+      opacity: .62;
     }
 
-    .modal-shell {
-      position: absolute;
-      inset: 24px;
-      border-radius: 24px;
+    html[data-theme="light"] body::after {
+      background:
+        radial-gradient(1200px 380px at 50% -6%, rgba(24,31,38,.045), transparent 70%),
+        linear-gradient(120deg, transparent 0%, transparent 25%, rgba(93,107,120,.13) 25.2%, transparent 25.5%, transparent 100%),
+        linear-gradient(165deg, transparent 0%, transparent 58%, rgba(93,107,120,.11) 58.2%, transparent 58.5%, transparent 100%),
+        linear-gradient(160deg, transparent 0%, transparent 74%, rgba(154,100,37,.15) 74.15%, transparent 74.5%, transparent 100%);
+      opacity: .36;
+    }
+    @keyframes mapDrift {
+      0% { transform: translateY(0); }
+      50% { transform: translateY(-12px); }
+      100% { transform: translateY(0); }
+    }
+
+    .skip {
+      position: absolute; left: 10px; top: -40px;
+      background: var(--accent); color: #1a1309;
+      padding: .5rem .75rem; text-decoration: none; font-weight: 700;
+      border-radius: 6px; z-index: 99;
+    }
+    .skip:focus { top: 10px; }
+
+    .container { width: min(var(--max), calc(100% - 2rem)); margin-inline: auto; }
+
+    header {
+      position: sticky; top: 0; z-index: 40;
+      border-bottom: 1px solid color-mix(in oklab, var(--line) 58%, transparent);
+      background: color-mix(in oklab, var(--bg) 88%, transparent);
+      backdrop-filter: blur(8px);
+    }
+    .top {
+      min-height: 70px;
+      display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    }
+    .brand { display: inline-flex; align-items: center; gap: .7rem; text-decoration: none; color: inherit; font-weight: 700; }
+    .brand svg { width: 32px; height: 32px; }
+
+    nav { display: flex; gap: .25rem; align-items: center; flex-wrap: wrap; }
+    nav a, .btn, .toggle {
+      text-decoration: none; color: inherit; font-weight: 600; font-size: .9rem;
+      padding: .52rem .78rem; border: 1px solid transparent; background: transparent; cursor: pointer;
+      transition: border-color .2s ease, background .2s ease, transform .2s ease;
+    }
+    nav a:hover, .btn:hover, .toggle:hover { transform: translateY(-1px); }
+    nav a:hover { border-color: var(--line); }
+    .btn { background: var(--accent); color: #23170b; border-color: color-mix(in oklab, var(--accent) 70%, #000); }
+    .toggle { border-color: var(--line); background: var(--bg-2); }
+
+    :focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
+
+    main { padding-bottom: 5rem; }
+    section { padding: clamp(3.2rem, 8vw, 6rem) 0; }
+
+    .hero { padding-top: clamp(3.5rem, 9vw, 6.8rem); }
+    .hero-grid { display: grid; grid-template-columns: 1.04fr .96fr; gap: clamp(1.4rem, 4vw, 3rem); align-items: start; }
+
+    .eyebrow {
+      font-size: .72rem; text-transform: uppercase; letter-spacing: .12em; font-weight: 700;
+      color: var(--accent-soft); margin-bottom: 1rem;
+    }
+    h1 {
+      margin: 0;
+      font-family: "Instrument Serif", Georgia, serif;
+      font-size: clamp(2.7rem, 8.2vw, 5.2rem);
+      line-height: .98; letter-spacing: -.03em; font-weight: 400;
+      max-width: 14ch;
+    }
+    .hero p { max-width: 57ch; margin-top: 1rem; color: var(--muted); font-size: .97rem; }
+    .cta { display: flex; gap: .65rem; flex-wrap: wrap; margin-top: 1.3rem; }
+
+    .hero-rail {
+      margin-top: 1.2rem;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0,1fr));
+      gap: .5rem;
+      font-size: .77rem; color: var(--muted);
+    }
+    .hero-rail span { padding-top: .45rem; border-top: 1px solid var(--line); }
+
+    .hero-map {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--bg-3), var(--bg-2));
+      min-height: 420px;
+      position: relative;
       overflow: hidden;
-      border: 1px solid var(--border);
-      background: rgba(10, 12, 13, 0.96);
-      box-shadow: var(--shadow);
+    }
+    .hero-map .caption {
+      position: absolute; left: 12px; bottom: 12px;
+      font-size: .72rem; color: var(--muted);
+      background: color-mix(in oklab, var(--bg-2) 85%, transparent);
+      padding: .25rem .45rem;
+      border: 1px solid color-mix(in oklab, var(--line) 50%, transparent);
     }
 
-    .modal-topbar {
-      height: 58px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 18px;
-      border-bottom: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.03);
-    }
+    h2 { font-size: clamp(1.38rem, 3vw, 2.15rem); line-height: 1.15; letter-spacing: -.015em; margin: 0 0 .6rem; }
+    h3 { margin: 0 0 .45rem; font-size: 1.02rem; }
+    p { margin: .35rem 0 0; color: var(--muted); font-size: .94rem; }
 
-    .modal-title {
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      font-size: 0.8rem;
+    .section-head { display: grid; grid-template-columns: 1.1fr .9fr; gap: 1rem; align-items: end; }
+    .note { font-size: .82rem; color: var(--muted); border-left: 2px solid var(--line); padding-left: .7rem; }
+
+    .proof-wrap {
+      margin-top: 1rem;
+      border: 1px solid var(--line);
+      background: var(--bg-2);
+      display: grid;
+      grid-template-columns: 1.25fr .75fr;
+    }
+    .proof-main { padding: 1rem; }
+    .proof-side {
+      border-left: 1px solid var(--line);
+      background: color-mix(in oklab, var(--bg-3) 80%, transparent);
+      padding: 1rem;
+      font-size: .84rem;
       color: var(--muted);
     }
 
-    .modal-close {
-      width: 42px;
-      height: 42px;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.05);
-      font-size: 1.25rem;
+    .log {
+      margin-top: .8rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .78rem;
+      background: #0d1318;
+      padding: .8rem;
+      border: 1px solid #26313b;
+      overflow: auto;
+      color: #c8d4de;
+    }
+    .log .ok { color: var(--ok); }
+    .log .warn { color: var(--accent-soft); }
+
+    .problem {
+      display: grid;
+      grid-template-columns: .95fr 1.05fr;
+      gap: 1.4rem;
+      align-items: start;
+    }
+    .problem .rail {
+      border-top: 1px solid var(--line);
+      padding-top: .8rem;
+      font-size: .84rem;
+      color: var(--muted);
     }
 
-    #monaco-editor {
-      position: absolute;
-      inset: 58px 0 0;
+    .cap-grid {
+      margin-top: 1rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.1rem 1.4rem;
+    }
+    .cap {
+      padding: .95rem 0;
+      border-top: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: .8rem;
+      align-items: start;
+    }
+    .idx {
+      font-size: .75rem;
+      color: var(--accent-soft);
+      font-weight: 800;
+      margin-top: .2rem;
     }
 
-    @media (max-width: 1440px) {
-      .top-frame {
-        grid-template-columns: 240px minmax(0, 1fr);
-      }
-
-      .summary-block {
-        grid-column: 1 / -1;
-      }
+    .how-diagram {
+      margin-top: 1rem;
+      border: 1px solid var(--line);
+      background: var(--bg-2);
+      padding: .8rem;
+      overflow: auto;
     }
 
-    @media (max-width: 1220px) {
-      .top-frame {
-        grid-template-columns: 1fr;
-      }
-
-      .control-row {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .summary-block {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .toolbar-group {
-        max-width: 100%;
-      }
-
-      .graph-subbar {
-        top: 136px;
-      }
-
-      #graph-container {
-        padding-top: 180px;
-      }
+    .workflow {
+      display: grid;
+      grid-template-columns: 1.05fr .95fr;
+      gap: 1.4rem;
+      align-items: start;
     }
+    .workflow .list {
+      margin-top: .4rem;
+      font-size: .88rem;
+      color: var(--muted);
+      display: grid;
+      gap: .5rem;
+    }
+    .workflow .list div {
+      padding-left: .65rem;
+      border-left: 2px solid color-mix(in oklab, var(--accent) 28%, var(--line));
+    }
+
+    .cta-band {
+      border: 1px solid var(--line);
+      padding: clamp(1rem, 2.7vw, 1.8rem);
+      background: linear-gradient(140deg, color-mix(in oklab, var(--bg-3) 84%, var(--accent) 16%), var(--bg-2));
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 1rem;
+      align-items: center;
+    }
+
+    footer {
+      padding: 1.3rem 0 2.3rem;
+      color: var(--muted);
+      font-size: .88rem;
+    }
+    .foot { display: flex; justify-content: space-between; gap: .8rem; flex-wrap: wrap; border-top: 1px solid color-mix(in oklab, var(--line) 70%, transparent); padding-top: .9rem; }
+
+    [data-reveal] {
+      opacity: 0; transform: translateY(12px);
+      transition: opacity .45s ease, transform .45s ease;
+    }
+    [data-reveal].in { opacity: 1; transform: none; }
 
     @media (max-width: 980px) {
-      body {
-        overflow: auto;
-      }
-
-      .shell {
-        height: auto;
-        min-height: 100vh;
-      }
-
-      .control-row {
-        grid-template-columns: 1fr;
-      }
-
-      .status-row {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .status-pill,
-      .mini-pill {
-        width: 100%;
-      }
-
-      .view-toggle-row {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-
-      .summary-block {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .main-frame,
-      .main-frame[data-view="graph"],
-      .main-frame[data-view="panel"] {
-        grid-template-columns: 1fr !important;
-      }
-
-      .pane-divider {
-        display: none;
-      }
-
-      .main-frame[data-view="graph"] .detail-shell,
-      .main-frame[data-view="panel"] .graph-shell {
-        opacity: 1;
-        pointer-events: auto;
-        border-width: 1px;
-      }
-
-      .graph-shell {
-        min-height: 58vh;
-      }
-
-      .detail-shell {
-        min-height: 36vh;
-      }
-
-      .graph-toolbar,
-      .graph-subbar {
-        left: 12px;
-        right: 12px;
-      }
-
-      #graph-container {
-        padding-top: 172px;
-      }
-
-      .toolbar-group,
-      .legend {
-        width: 100%;
-      }
-
-      .chat-composer {
-        grid-template-columns: 1fr;
-      }
-
-      #chat-send-btn {
-        width: 100%;
-        min-width: 0;
-      }
-
-      .panel-actions {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
+      .hero-grid, .section-head, .proof-wrap, .problem, .cap-grid, .workflow, .cta-band { grid-template-columns: 1fr; }
+      .proof-side { border-left: 0; border-top: 1px solid var(--line); }
+      .hero-map { min-height: 340px; }
+      .hero-rail { grid-template-columns: 1fr; }
+      .top { align-items: flex-start; padding: .65rem 0; }
     }
 
-    @media (max-width: 640px) {
-      .shell {
-        padding: 12px;
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition-duration: .01ms !important;
+        scroll-behavior: auto !important;
       }
-
-      .top-frame,
-      .main-frame {
-        border-radius: 22px;
-        padding: 12px;
-      }
-
-      .brand-title {
-        font-size: 1.65rem;
-      }
-
-      .summary-block {
-        grid-template-columns: 1fr;
-      }
-
-      .legend {
-        min-width: 0;
-        width: 100%;
-      }
-
-      .graph-toolbar {
-        position: static;
-        padding: 14px 14px 0;
-        flex-direction: column;
-      }
-
-      .toolbar-group {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        width: 100%;
-      }
-
-      .history-card {
-        padding: 14px;
-      }
-
-      .history-scrub-row {
-        grid-template-columns: 1fr;
-      }
-
-      .ghost-btn,
-      .action-btn,
-      .panel-action {
-        width: 100%;
-      }
-
-      .graph-subbar {
-        position: static;
-        padding: 12px 14px 0;
-        max-width: none;
-        flex-direction: column;
-        align-items: flex-start;
-      }
-
-      #graph-container {
-        padding-top: 0;
-      }
-
-      .status-row,
-      .view-toggle-row,
-      .panel-actions {
-        grid-template-columns: 1fr;
-      }
-
-      .modal-shell {
-        inset: 12px;
-        border-radius: 18px;
-      }
-
-      .empty-state {
-        position: static;
-        transform: none;
-        width: auto;
-        margin: 90px 14px 14px;
-      }
+      [data-reveal] { opacity: 1; transform: none; }
     }
   </style>
 </head>
-
 <body>
-  <div class="shell">
-    <section class="top-frame">
-      <div class="brand-block">
-        <div>
-          <div class="eyebrow">Code topology explorer</div>
-          <h1 class="brand-title">CodeMapper</h1>
-        </div>
-        <p class="brand-copy">
-          Scan a Python repository, trace live relationships, inspect mutation hotspots, and simulate impact before you
-          change code.
-        </p>
-      </div>
+  <a class="skip" href="#main">Skip to content</a>
 
-      <div class="controls-block">
-        <div class="control-row">
-          <label class="field-shell" for="path-input">
-            <span class="field-icon">Path</span>
-            <input id="path-input" type="text" placeholder="Enter local path or GitHub URL..." />
-          </label>
-          <label class="field-shell" for="language-input">
-            <span class="field-icon">Language</span>
-            <select id="language-input">
-              <option value="python">Python</option>
-              <option value="typescript">TypeScript</option>
-              <option value="go">Go</option>
-              <option value="java">Java</option>
-            </select>
-          </label>
-          <button id="scan-btn" class="action-btn">Scan Project</button>
-          <label class="field-shell" for="search-input">
-            <span class="field-icon">Search</span>
-            <input id="search-input" type="text" placeholder="Filter by node name or summary..." />
-          </label>
-        </div>
-
-        <div class="status-row">
-          <div id="status-label" class="status-pill">Ready to scan</div>
-          <div class="mini-pill">Nodes <strong id="metric-nodes">0</strong></div>
-          <div class="mini-pill">Edges <strong id="metric-edges">0</strong></div>
-          <div class="mini-pill">Selection <strong id="metric-selected">None</strong></div>
-          <div class="mini-pill">Mode <strong id="metric-mode">Explore</strong></div>
-        </div>
-
-        <div class="view-toggle-row">
-          <button id="view-split-btn" class="ghost-btn active">Split View</button>
-          <button id="view-graph-btn" class="ghost-btn">Graph Focus</button>
-          <button id="view-panel-btn" class="ghost-btn">Prompt Focus</button>
-        </div>
-
-        <div class="scan-history-shell">
-          <div class="scan-history-header">
-            <div class="scan-history-title">Recent scans</div>
-            <button id="scan-history-clear-btn" class="ghost-btn">Clear History</button>
-          </div>
-          <div id="scan-history-list" class="scan-history-list">
-            <div class="scan-history-empty">Scanned project paths and GitHub repos will appear here.</div>
-          </div>
-        </div>
-
-      </div>
-
-      <div class="summary-block">
-        <div class="metric-card">
-          <div class="metric-label">Scan lens</div>
-          <div class="metric-value">AST</div>
-          <div class="metric-note">Functions, classes, imports, and call edges are extracted directly from Python
-            source.</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">Signal</div>
-          <div class="metric-value">Git</div>
-          <div class="metric-note">Recent churn colors the graph so hotspots stand out before you drill in.</div>
-        </div>
-      </div>
-    </section>
-
-    <section class="main-frame">
-      <div class="graph-shell">
-        <div class="graph-toolbar">
-          <div class="toolbar-group">
-            <button id="tree-layout-btn" class="ghost-btn active">Tree Layout</button>
-            <button id="force-layout-btn" class="ghost-btn">Force Layout</button>
-            <button id="cluster-toggle-btn" class="ghost-btn active">Cluster View</button>
-            <button id="history-btn" class="ghost-btn">Evolution</button>
-            <button id="theme-light-btn" class="ghost-btn">Light Theme</button>
-            <button id="theme-dark-btn" class="ghost-btn active">Dark Theme</button>
-            <button id="edge-label-toggle-btn" class="ghost-btn">Edge Labels</button>
-            <label class="toolbar-inline-control" for="neighbor-depth-range">
-              <span>Depth</span>
-              <input id="neighbor-depth-range" type="range" min="1" max="3" step="1" value="2" />
-              <strong id="neighbor-depth-value">2</strong>
-            </label>
-            <label class="toolbar-inline-control" for="graph-spacing-range">
-              <span>Spacing</span>
-              <input id="graph-spacing-range" type="range" min="0.8" max="1.6" step="0.1" value="1.0" />
-              <strong id="graph-spacing-value">1.0</strong>
-            </label>
-            <button id="reset-view-btn" class="ghost-btn">Reset View</button>
-            <button id="stop-build-btn" class="ghost-btn">Stop Build</button>
-            <button id="graph-load-more-btn" class="ghost-btn">Load More</button>
-            <button id="graph-show-all-btn" class="ghost-btn">Show All</button>
-            <button id="export-svg-btn" class="ghost-btn">Export SVG</button>
-            <button id="export-png-btn" class="ghost-btn">Export PNG</button>
-            <button id="export-json-btn" class="ghost-btn">Export JSON</button>
-          </div>
-          <div class="legend">
-            <div class="legend-title">Mutation legend</div>
-            <div class="legend-row"><span class="legend-dot" style="background:#00ff88;"></span><span
-                class="legend-name">New</span><span>recent file</span></div>
-            <div class="legend-row"><span class="legend-dot" style="background:#ffcc00;"></span><span
-                class="legend-name">Modified</span><span>last 30 commits</span></div>
-            <div class="legend-row"><span class="legend-dot" style="background:#ff4444;"></span><span
-                class="legend-name">Hotspot</span><span>high churn</span></div>
-            <div class="legend-row"><span class="legend-dot" style="background:#aaaaaa;"></span><span
-                class="legend-name">Stable</span><span>no recent activity</span></div>
-            <div id="focus-badge" class="graph-progress-pill">Focus OFF</div>
-            <div id="graph-progress-pill" class="graph-progress-pill">Visible<strong>0 / 0</strong></div>
-          </div>
-        </div>
-
-        <div class="graph-subbar">
-          <div id="graph-breadcrumbs" class="breadcrumb-bar"></div>
-        </div>
-
-        <div id="graph-container">
-          <div id="node-tooltip" class="node-tooltip">
-            <div id="node-tooltip-title" class="node-tooltip-title"></div>
-            <div id="node-tooltip-body" class="node-tooltip-body"></div>
-          </div>
-          <div id="graph-empty-state" class="empty-state">
-            <h2 class="empty-title">Scan a codebase to light up the map.</h2>
-            <p class="empty-copy">
-              Paste a local repository path or GitHub URL, run a scan, then click nodes for details, right-click for
-              blast radius, and
-              double-click to open source.
-            </p>
-            <div class="empty-points">
-              <div class="empty-point">Interactive force graph</div>
-              <div class="empty-point">AI summaries</div>
-              <div class="empty-point">Git mutation overlays</div>
-              <div class="empty-point">Impact simulation</div>
-            </div>
-          </div>
-          <div id="scan-overlay" class="scan-overlay">
-            <div class="scan-card">
-              <div class="scan-ring-stack">
-                <div class="scan-ring ring-one"></div>
-                <div class="scan-ring ring-two"></div>
-                <div class="scan-ring ring-three"></div>
-                <div class="scan-core"></div>
-              </div>
-              <h3 class="scan-title">Deciphering project structure</h3>
-              <p id="scan-overlay-copy" class="scan-copy">
-                Parsing Python files, linking calls, and preparing the dependency map.
-              </p>
-            </div>
-          </div>
-          <div id="history-overlay" class="history-overlay">
-            <div class="history-card">
-              <div class="history-header">
-                <div>
-                  <h3 class="history-title">Project evolution</h3>
-                  <p class="history-copy">
-                    Scrub through git history and watch how the architecture map changed over time.
-                  </p>
-                </div>
-                <button id="history-close-btn" class="panel-close" title="Close evolution view">x</button>
-              </div>
-              <div class="history-controls">
-                <div class="history-topbar">
-                  <button id="history-play-btn" class="ghost-btn">Play Timeline</button>
-                  <button id="history-live-btn" class="ghost-btn">Back To Live Graph</button>
-                  <div class="history-stepper">
-                    <button id="history-prev-btn" class="ghost-btn">Prev Commit</button>
-                    <button id="history-next-btn" class="ghost-btn">Next Commit</button>
-                    <button id="history-diff-btn" class="ghost-btn">Show Diff</button>
-                  </div>
-                  <label class="history-speed-shell" for="history-speed-select">
-                    <span>Playback</span>
-                    <select id="history-speed-select">
-                      <option value="3500">Faster</option>
-                      <option value="7000" selected>Slower</option>
-                      <option value="12000">Slowest</option>
-                    </select>
-                  </label>
-                  <div id="history-frame-counter" class="history-badge">0 / 0</div>
-                  <div id="history-status" class="history-badge">Load a scanned git repo to begin.</div>
-                </div>
-                <div class="history-scrub-row">
-                  <div id="history-start-label" class="history-badge">Oldest</div>
-                  <input id="history-range" class="history-range" type="range" min="0" max="0" value="0" />
-                  <div id="history-end-label" class="history-badge">Newest</div>
-                </div>
-                <div class="history-commit-card">
-                  <div id="history-commit-title" class="history-commit-title">No timeline loaded yet.</div>
-                  <div id="history-commit-meta" class="history-commit-line"></div>
-                </div>
-                <div id="history-diff-body" class="history-diff-card">
-                  <div class="history-diff-empty">Click `Show Diff` to compare the current commit with the previous commit.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <svg id="graph-svg"></svg>
-        </div>
-      </div>
-
-      <div id="pane-divider" class="pane-divider" aria-hidden="true"></div>
-
-      <aside id="detail-shell" class="detail-shell hidden">
-        <div id="detail-panel" class="hidden">
-          <div class="panel-card">
-            <div class="detail-header">
-              <div>
-                <div class="panel-label">Selected node</div>
-                <div id="node-name">Select a node</div>
-                <div id="node-file"></div>
-              </div>
-              <button id="panel-close-btn" class="panel-close" title="Close panel">x</button>
-            </div>
-          </div>
-
-          <div class="panel-card">
-            <div class="panel-label">Summary</div>
-            <div id="node-summary">Node details will appear here.</div>
-          </div>
-
-          <div class="panel-card">
-            <div class="panel-label">Project insights</div>
-            <div id="project-insights" class="list-wrap">Scan a project to load architecture insights.</div>
-          </div>
-
-          <div class="panel-card">
-            <div class="panel-label chat-panel-label">Chat</div>
-            <div class="chat-shell">
-              <div class="chat-toolbar">
-                <div class="chat-toolbar-title">Saved chats</div>
-                <div class="chat-toolbar-actions">
-                  <button id="chat-clear-all-btn" class="panel-action">Clear All</button>
-                  <button id="chat-new-btn" class="panel-action">New Chat</button>
-                </div>
-              </div>
-              <div id="chat-session-bar" class="chat-session-bar">
-                <div class="chat-session-empty">Your saved chat threads will appear here.</div>
-              </div>
-              <div id="chat-messages" class="chat-messages">
-                <div class="chat-empty">Ask about the selected node or overall project architecture.</div>
-              </div>
-              <div class="chat-composer">
-                <textarea id="chat-input" placeholder="Ask a question about this node or the project..."></textarea>
-                <button id="chat-send-btn" class="panel-action">Ask AI</button>
-              </div>
-            </div>
-            <div id="chat-hint" class="chat-hint">Uses provider: groq (configurable later).</div>
-          </div>
-
-          <div class="panel-card">
-            <div id="mutation-badge"></div>
-            <div id="churn-info"></div>
-            <div class="panel-actions">
-              <button id="simulate-blast-btn" class="panel-action" disabled>Simulate Blast Radius</button>
-              <button id="clear-blast-btn" class="panel-action">Clear Blast View</button>
-              <button id="view-source-btn" class="panel-action" disabled>Open Source</button>
-            </div>
-          </div>
-
-          <div class="panel-card">
-            <div class="panel-label">Callers</div>
-            <div id="callers-list" class="list-wrap"></div>
-          </div>
-
-          <div class="panel-card">
-            <div class="panel-label">Callees</div>
-            <div id="callees-list" class="list-wrap"></div>
-          </div>
-
-          <div class="panel-card">
-            <div class="panel-label">Blast radius</div>
-            <div id="blast-info">Right-click a node to simulate impact.</div>
-          </div>
-
-          <div class="panel-card action-plan-block">
-            <div class="panel-label">Action plan</div>
-            <div id="action-plan-content" class="action-plan-content">
-              <div class="muted">Select a node, then click Generate Plan to produce rollout steps and test focus.</div>
-            </div>
-            <div class="panel-actions">
-              <button id="generate-action-plan-btn" class="panel-action">Generate Plan</button>
-              <button id="export-action-plan-btn" class="panel-action" disabled>Export Markdown</button>
-            </div>
-          </div>
-
-          <div class="panel-card">
-            <div class="panel-label">Collaboration</div>
-            <div class="list-wrap">
-              <div class="muted">Team workspace</div>
-              <div class="panel-actions">
-                <select id="workspace-select" class="panel-action">
-                  <option value="">Personal</option>
-                </select>
-                <button id="workspace-refresh-btn" class="panel-action">Refresh</button>
-              </div>
-              <div class="panel-actions">
-                <input id="workspace-name-input" class="panel-action" type="text" placeholder="New workspace name" />
-                <button id="workspace-create-btn" class="panel-action">Create</button>
-              </div>
-              <div class="muted">Share current view</div>
-              <div class="panel-actions">
-                <button id="share-link-create-btn" class="panel-action">Create Share Link</button>
-                <input id="share-link-token-input" class="panel-action" type="text" placeholder="Share token or URL" />
-                <button id="share-link-load-btn" class="panel-action">Load Share</button>
-              </div>
-              <div id="share-link-output" class="muted">No share link created yet.</div>
-              <hr style="border-color: var(--border); opacity: 0.5;" />
-              <div class="muted">Investigation sessions</div>
-              <div class="panel-actions">
-                <input id="investigation-title-input" class="panel-action" type="text" placeholder="Session title" />
-                <button id="investigation-save-btn" class="panel-action">Save Session</button>
-                <button id="investigation-refresh-btn" class="panel-action">Refresh Sessions</button>
-              </div>
-              <div id="investigation-session-list" class="list-wrap">No saved sessions yet.</div>
-              <hr style="border-color: var(--border); opacity: 0.5;" />
-              <div class="muted">PR-aware analysis</div>
-              <div class="panel-actions">
-                <input id="pr-url-input" class="panel-action" type="text" placeholder="https://github.com/org/repo/pull/123" />
-                <button id="pr-analyze-btn" class="panel-action">Analyze PR</button>
-              </div>
-              <div id="pr-analysis-results" class="list-wrap">Analyze a PR URL to highlight impacted regions.</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="detail-placeholder">
-          Pick a node to inspect source relationships, Git churn, and downstream impact in one place.
-        </div>
-      </aside>
-    </section>
-  </div>
-
-  <div id="monaco-modal">
-    <div class="modal-shell">
-      <div class="modal-topbar">
-        <div class="modal-title">Source viewer</div>
-        <button class="modal-close" id="modal-close-btn">x</button>
-      </div>
-      <div id="monaco-editor"></div>
+  <header>
+    <div class="container top">
+      <a href="#top" class="brand" aria-label="CodeWeave home">
+        <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CodeWeave logo">
+          <defs><linearGradient id="cw" x1="0" x2="1"><stop offset="0" stop-color="#d8b487"/><stop offset="1" stop-color="#8b5d2d"/></linearGradient></defs>
+          <rect x="8" y="8" width="104" height="104" rx="10" fill="#171d22" stroke="url(#cw)" stroke-width="7"/>
+          <path d="M26 36 C42 36, 42 56, 58 56 C74 56, 74 36, 90 36" fill="none" stroke="url(#cw)" stroke-width="6"/>
+          <path d="M26 60 C42 60, 42 80, 58 80 C74 80, 74 60, 90 60" fill="none" stroke="url(#cw)" stroke-width="6"/>
+          <path d="M26 84 C42 84, 42 64, 58 64 C74 64, 74 84, 90 84" fill="none" stroke="url(#cw)" stroke-width="6"/>
+        </svg>
+        <span>CodeWeave</span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="#proof">Proof</a>
+        <a href="#capabilities">Capabilities</a>
+        <a href="#how">How it works</a>
+        <a href="#workflow">Workflow value</a>
+        <a class="btn" href="https://github.com/Whauv/CodeWeave" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <button id="theme" class="toggle" type="button" aria-label="Toggle theme">Light</button>
+      </nav>
     </div>
-  </div>
+  </header>
 
-  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
-  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
-  <script src="/graph_state.js"></script>
-  <script src="/browser_store.js"></script>
-  <script src="/graph_renderer.js"></script>
-  <script src="/graph_effects_controller.js"></script>
-  <script src="/node_interactions.js"></script>
-  <script src="/history_controller.js"></script>
-  <script src="/scan_controller.js"></script>
-  <script src="/graph_ui_controller.js"></script>
-  <script src="/panel.js"></script>
-  <script src="/graph.js"></script>
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="container hero-grid">
+        <div data-reveal>
+          <div class="eyebrow">AI-Assisted Architecture Intelligence</div>
+          <h1>Map dependency flow before you ship risky changes.</h1>
+          <p>CodeWeave analyzes repository structure and turns code relationships into a navigable architecture graph with blast-radius awareness, timeline evolution, and actionable engineering output.</p>
+          <div class="cta">
+            <a class="btn" href="https://github.com/Whauv/CodeWeave" target="_blank" rel="noopener noreferrer">View on GitHub</a>
+            <a class="toggle" href="#proof">See product proof</a>
+          </div>
+          <div class="hero-rail">
+            <span>Creator: Pranav Chopdekar</span>
+            <span>Stack: Flask + D3 + Monaco</span>
+            <span>Modes: Graph, blast radius, evolution</span>
+          </div>
+        </div>
+
+        <aside class="hero-map" data-reveal aria-label="Code dependency map">
+          <svg viewBox="0 0 700 420" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dependency graph illustration">
+            <defs>
+              <linearGradient id="e1" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#647283" stop-opacity=".25"/>
+                <stop offset="1" stop-color="#b98646" stop-opacity=".50"/>
+              </linearGradient>
+            </defs>
+            <rect width="700" height="420" fill="transparent"/>
+            <g stroke="url(#e1)" stroke-width="2" fill="none" stroke-linecap="round">
+              <path d="M76 64 C214 64, 208 64, 338 64"/>
+              <path d="M76 122 C214 122, 208 108, 338 106"/>
+              <path d="M76 180 C214 180, 208 152, 338 148"/>
+              <path d="M76 238 C214 238, 208 196, 338 192"/>
+              <path d="M76 296 C214 296, 208 240, 338 236"/>
+              <path d="M76 354 C214 354, 208 286, 338 280"/>
+              <path d="M350 64 C476 64, 486 84, 614 88"/>
+              <path d="M350 106 C476 106, 486 124, 614 128"/>
+              <path d="M350 148 C476 148, 486 166, 614 168"/>
+              <path d="M350 192 C476 192, 486 208, 614 208"/>
+              <path d="M350 236 C476 236, 486 250, 614 250"/>
+              <path d="M350 280 C476 280, 486 294, 614 294"/>
+            </g>
+            <g fill="#b98646">
+              <circle cx="66" cy="64" r="11"/><circle cx="66" cy="122" r="8"/><circle cx="66" cy="180" r="9"/><circle cx="66" cy="238" r="9"/><circle cx="66" cy="296" r="8"/><circle cx="66" cy="354" r="10"/>
+            </g>
+            <g fill="#83909d">
+              <circle cx="344" cy="64" r="8"/><circle cx="344" cy="106" r="8"/><circle cx="344" cy="148" r="8"/><circle cx="344" cy="192" r="8"/><circle cx="344" cy="236" r="8"/><circle cx="344" cy="280" r="8"/>
+            </g>
+            <g fill="#aeb7bf">
+              <circle cx="624" cy="88" r="7"/><circle cx="624" cy="128" r="7"/><circle cx="624" cy="168" r="7"/><circle cx="624" cy="208" r="7"/><circle cx="624" cy="250" r="7"/><circle cx="624" cy="294" r="7"/>
+            </g>
+            <g font-family="Inter, sans-serif" font-size="11" fill="#b8c0c8" opacity=".86">
+              <text x="82" y="68">server.app</text>
+              <text x="82" y="184">history_controller</text>
+              <text x="350" y="68">scan_repository</text>
+              <text x="350" y="196">compute_blast_radius</text>
+              <text x="632" y="132">graph_builder</text>
+              <text x="632" y="212">history_diff</text>
+            </g>
+          </svg>
+          <div class="caption">dependency map preview • architecture flow</div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="proof">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <div>
+            <h2>Product proof: job pipeline to architecture output</h2>
+            <p>CodeWeave runs scans asynchronously, resolves graph state, and exposes direct API output for blast-radius and evolution workflows.</p>
+          </div>
+          <div class="note">The same backend pipeline powers graph rendering, commit history playback, diff context, and action-plan generation.</div>
+        </div>
+
+        <div class="proof-wrap" data-reveal>
+          <div class="proof-main">
+            <pre class="log"><code>POST /api/v1/jobs/scan                  <span class="ok">202 Accepted</span>
+GET  /api/v1/jobs/&lt;job_id&gt;             <span class="ok">completed</span>
+GET  /api/v1/jobs/&lt;job_id&gt;/result
+
+<span class="warn">hotspots</span>: server.app, graph_renderer, history_controller
+insight: high coupling around history route compatibility
+action_plan: isolate history wrappers + harden node-focus state transitions</code></pre>
+          </div>
+          <aside class="proof-side">
+            <strong>Operational signals</strong><br/>
+            Scan jobs • history snapshots • diff loading • action-plan synthesis<br/><br/>
+            Production value: faster root-cause isolation and safer refactor planning on large repositories.
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="problem">
+      <div class="container problem">
+        <div data-reveal>
+          <h2>Codebases become risky when structure is invisible.</h2>
+          <p>Most engineering delays are not from writing code; they are from uncertainty about impact. Manual traversal across files and commits hides dependency pathways that decide whether a change is safe.</p>
+        </div>
+        <div class="rail" data-reveal>
+          Without architecture visibility, reviews rely on intuition, timeline context gets fragmented, and blast radius is guessed too late.
+        </div>
+      </div>
+    </section>
+
+    <section id="capabilities">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <div>
+            <h2>Core capabilities</h2>
+            <p>Built for engineers who need structural clarity, not abstract AI text.</p>
+          </div>
+          <div class="note">Plugin parsing supports Python, TypeScript, Go, and Java while preserving a unified graph model.</div>
+        </div>
+
+        <div class="cap-grid">
+          <article class="cap" data-reveal><div class="idx">01</div><div><h3>Repository graph mapping</h3><p>Transform source trees into a dependency graph that can be explored by node, edge, and cluster behavior.</p></div></article>
+          <article class="cap" data-reveal><div class="idx">02</div><div><h3>Blast-radius simulation</h3><p>Select a node and preview which connected regions are likely to be affected by mutation or removal.</p></div></article>
+          <article class="cap" data-reveal><div class="idx">03</div><div><h3>Evolution timeline and diff</h3><p>Load commit history snapshots and compare architecture state transitions over time.</p></div></article>
+          <article class="cap" data-reveal><div class="idx">04</div><div><h3>Actionable AI output</h3><p>Summaries and action plans are grounded in graph state and repo context, not generic suggestions.</p></div></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="how">
+      <div class="container" data-reveal>
+        <h2>How CodeWeave works</h2>
+        <p>Structured flow from repository input to engineering decision output.</p>
+        <div class="how-diagram">
+          <svg viewBox="0 0 1080 270" width="100%" height="220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CodeWeave process flow">
+            <defs>
+              <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+                <path d="M0,0 L9,4.5 L0,9 z" fill="#8a96a2"/>
+              </marker>
+            </defs>
+            <rect x="20" y="58" width="250" height="150" fill="#1c2228" stroke="#313c46"/>
+            <rect x="410" y="36" width="250" height="194" fill="#1c2228" stroke="#313c46"/>
+            <rect x="800" y="58" width="250" height="150" fill="#1c2228" stroke="#313c46"/>
+            <path d="M272 134 L404 134" stroke="#8a96a2" stroke-width="2.2" fill="none" marker-end="url(#a)"/>
+            <path d="M662 134 L794 134" stroke="#8a96a2" stroke-width="2.2" fill="none" marker-end="url(#a)"/>
+            <text x="40" y="92" fill="#dce4ea" font-size="17" font-family="Inter" font-weight="700">Input</text>
+            <text x="40" y="120" fill="#9da9b5" font-size="13" font-family="Inter">Repo path or Git source</text>
+            <text x="40" y="142" fill="#9da9b5" font-size="13" font-family="Inter">Parser/plugin selection</text>
+            <text x="40" y="164" fill="#9da9b5" font-size="13" font-family="Inter">Target analysis scope</text>
+
+            <text x="430" y="72" fill="#dce4ea" font-size="17" font-family="Inter" font-weight="700">Processing</text>
+            <text x="430" y="100" fill="#9da9b5" font-size="13" font-family="Inter">AST extraction + graph construction</text>
+            <text x="430" y="122" fill="#9da9b5" font-size="13" font-family="Inter">Blast-radius computation</text>
+            <text x="430" y="144" fill="#9da9b5" font-size="13" font-family="Inter">History snapshot/diff resolution</text>
+            <text x="430" y="166" fill="#9da9b5" font-size="13" font-family="Inter">Insights + action-plan synthesis</text>
+
+            <text x="820" y="92" fill="#dce4ea" font-size="17" font-family="Inter" font-weight="700">Output</text>
+            <text x="820" y="120" fill="#9da9b5" font-size="13" font-family="Inter">Interactive dependency graph</text>
+            <text x="820" y="142" fill="#9da9b5" font-size="13" font-family="Inter">Risk hotspots + affected paths</text>
+            <text x="820" y="164" fill="#9da9b5" font-size="13" font-family="Inter">Concrete engineering actions</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <section id="workflow">
+      <div class="container workflow">
+        <div data-reveal>
+          <h2>Workflow value for real teams</h2>
+          <p>CodeWeave reduces uncertainty in large-repo work: onboarding, refactor scoping, bug-impact triage, and architecture-aware review.</p>
+        </div>
+        <div class="list" data-reveal>
+          <div>Scope risky edits before implementation starts.</div>
+          <div>Review PR impact with graph-backed evidence.</div>
+          <div>Recover architecture context faster in unfamiliar code.</div>
+          <div>Turn timeline diffs into concrete technical action items.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="cta">
+      <div class="container">
+        <div class="cta-band" data-reveal>
+          <div>
+            <h2>Explore CodeWeave on GitHub</h2>
+            <p>Run a scan, inspect dependency flow, and contribute to a serious architecture-intelligence tool for modern engineering teams.</p>
+          </div>
+          <a class="btn" href="https://github.com/Whauv/CodeWeave" target="_blank" rel="noopener noreferrer">Open repository</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container foot">
+      <div>CodeWeave by Pranav Chopdekar</div>
+      <div><a href="https://github.com/Whauv" target="_blank" rel="noopener noreferrer">@Whauv</a> · <a href="https://github.com/Whauv/CodeWeave" target="_blank" rel="noopener noreferrer">Project repo</a></div>
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      const html = document.documentElement;
+      const btn = document.getElementById('theme');
+      const stored = localStorage.getItem('codeweave-theme');
+      const prefLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+      const initial = stored || (prefLight ? 'light' : 'dark');
+      html.setAttribute('data-theme', initial);
+      btn.textContent = initial === 'dark' ? 'Light' : 'Dark';
+
+      btn.addEventListener('click', () => {
+        const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+        localStorage.setItem('codeweave-theme', next);
+        btn.textContent = next === 'dark' ? 'Light' : 'Dark';
+      });
+
+      const reveal = document.querySelectorAll('[data-reveal]');
+      if ('IntersectionObserver' in window) {
+        const io = new IntersectionObserver((entries) => {
+          entries.forEach((e) => {
+            if (e.isIntersecting) {
+              e.target.classList.add('in');
+              io.unobserve(e.target);
+            }
+          });
+        }, { threshold: .14, rootMargin: '0px 0px -9% 0px' });
+        reveal.forEach((el) => io.observe(el));
+      } else {
+        reveal.forEach((el) => el.classList.add('in'));
+      }
+    })();
+  </script>
 </body>
-
 </html>
